@@ -1,0 +1,59 @@
+<html>
+    <head>
+        <title>Rechnung Nr. {{ .invoice_no }}</title>
+        <style>
+            @media screen {
+                .page {
+                    margin: 10mm;
+                    box-shadow: 0 0 5mm rgba(0, 0, 0, 0.2);
+                }
+            }
+
+            @media print {
+                .page {
+                    margin: 0;
+                }
+            }
+
+            @page {
+                size: A4;
+                padding: 0;
+                margin: 0;
+            }
+
+            .page {
+                width: 210mm;
+                height: 297mm;
+
+                padding: 15mm;
+
+                overflow: hidden;
+                position: relative;
+                box-sizing: border-box;
+                page-break-after: always;
+                background-size: cover;
+            }
+
+            body {
+                font-size: 12pt;
+            }
+
+            h1 {
+                font-size: 24pt;
+                font-weight: bold;
+                margin: 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <h1>{{ .title }}</h1>
+            <p>Created at {{ .date }}</p>
+            <ul>
+                {{ range .list }}
+                <li>{{ .name }}: {{ printf "%.2f" .amount }}</li>
+                {{ end }}
+            </ul>
+        </div>
+    </body>
+</html>

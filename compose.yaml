@@ -1,0 +1,11 @@
+version: "3"
+
+services:
+    httpdf:
+        build:
+            context: .
+            target: hot-reload
+        volumes:
+            - .:/app:rw
+        ports:
+            - "8080:8080"
