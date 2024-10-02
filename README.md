@@ -45,7 +45,7 @@ page:
     height: height of the resulting PDF in mm
 ```
 
-`example.json` is currently unused, but can be added for testing and documentation purposes, providing some example data to render the template. We might add some tooling to preview a template during template development using the provided sample data. We might also add an API endpoint to serve the example data to clients.
+`example.json` can be added for testing and documentation purposes, providing some example data to render the template during template development
 
 ## Development
 
@@ -56,3 +56,7 @@ docker compose up
 ```
 
 The container image includes a Chromium instance for HTML rendering. If you want to run the server directly in your host OS without using docker, you need to tell the app the path to a Chromium binary (TBD).
+
+```sh
+go run ./cmd/server
+```

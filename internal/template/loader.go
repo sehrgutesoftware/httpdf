@@ -2,6 +2,7 @@ package template
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,11 +17,16 @@ import (
 var (
 	// ErrTemplateNotFound is returned when a template is not found
 	ErrTemplateNotFound = errors.New("template not found")
+	// ErrNoExampleData is returned when no example data is found
+	ErrNoExampleData = errors.New("no example data found")
 )
 
 // Loader allows access to templates
 type Loader interface {
+	// Load loads a template by name
 	Load(name string) (*Template, error)
+	// ExampleData loads the example data for a template
+	ExampleData(name string) (map[string]any, error)
 }
 
 // fsLoader is a Loader implementation that loads templates from a filesystem.
@@ -98,6 +104,25 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	}
 
 	return tmpl, nil
+}
+
+// ExampleData loads the example data for a template, if it exists
+func (l *fsLoader) ExampleData(name string) (map[string]any, error) {
+	dataPath := path.Join(name, "example.json")
+	fd, err := l.root.Open(dataPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNoExampleData
+	} else if err != nil {
+		return nil, fmt.Errorf("could not open example data file: %w", err)
+	}
+	defer fd.Close()
+
+	var data map[string]any
+	if err := json.NewDecoder(fd).Decode(&data); err != nil {
+		return nil, fmt.Errorf("could not decode example data file: %w", err)
+	}
+
+	return data, nil
 }
 
 // cachingFSLoader is a Loader implementation that caches all templates in memory.

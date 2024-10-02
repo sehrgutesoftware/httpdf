@@ -3,6 +3,7 @@ package httpdf
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -10,9 +11,17 @@ import (
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 )
 
+var (
+	// ErrInvalidValues is returned when the values are invalid
+	ErrInvalidValues = errors.New("invalid values")
+)
+
 // HTTPDF is the interface for the HTTPDF service.
 type HTTPDF interface {
+	// Generate renders a PDF from the given template and values.
 	Generate(template string, values map[string]any, out io.Writer) error
+	// Preview renders an HTML preview of the given template with its example values.
+	Preview(template string, out io.Writer) error
 }
 
 // httPDF is the core implementation of the httPDF service.
@@ -46,7 +55,7 @@ func (w *httPDF) Generate(template string, values map[string]any, out io.Writer)
 	}
 
 	if valid := w.validator.Validate(tmpl, values); !valid.Valid {
-		return fmt.Errorf("invalid values: %v", valid.Errors)
+		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
 	}
 
 	html := bytes.NewBuffer(nil)
@@ -59,6 +68,29 @@ func (w *httPDF) Generate(template string, values map[string]any, out io.Writer)
 		Height: tmpl.Config.Page.Height,
 	}); err != nil {
 		return fmt.Errorf("failed to render PDF: %w", err)
+	}
+
+	return nil
+}
+
+// Preview renders an HTML preview of the given template with its example values.
+func (w *httPDF) Preview(template string, out io.Writer) error {
+	tmpl, err := w.templates.Load(template)
+	if err != nil {
+		return fmt.Errorf("failed to load template: %w", err)
+	}
+
+	exampleData, err := w.templates.ExampleData(template)
+	if err != nil {
+		return fmt.Errorf("failed to load example data: %w", err)
+	}
+
+	if valid := w.validator.Validate(tmpl, exampleData); !valid.Valid {
+		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
+	}
+
+	if err := w.htmlRenderer.Render(tmpl, exampleData, out); err != nil {
+		return fmt.Errorf("failed to render HTML: %w", err)
 	}
 
 	return nil
