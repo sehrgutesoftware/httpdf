@@ -16,6 +16,14 @@ Templates and schemas are plain text files and therefore easily manageable. The 
 
 The web service can be run as a simple go binary or as a [docker image](https://hub.docker.com/r/sehrgutesoftware/httpdf).
 
+### API
+
+#### `POST /templates/{template}/render`
+Render the template using the JSON-encoded data provided in the request body. Successful response is of `Content-Type: application/pdf`.
+
+#### `GET /templates/{template}/preview`
+Render an HTML preview of the template using data from the template's `example.json` file. Useful for template development.
+
 ### Creating Templates
 
 > Check the [templates/example](./templates/example/) directory for an example template.
