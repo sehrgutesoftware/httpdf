@@ -46,10 +46,13 @@ RUN go build -o /build/httpdf-server ./cmd/server
 # +-----------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION}
 
-USER appuser
-
-# Install runtime dependencies
+# Install necessary packages, including Chromium
 RUN apk add --no-cache chromium
+
+# Create an appuser
+RUN adduser -D appuser
+
+USER appuser
 
 # Copy the compiled binaries from the builder image
 COPY --from=builder --chown=appuser /build/* /usr/local/bin/
