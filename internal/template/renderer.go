@@ -27,7 +27,9 @@ func (r *renderer) Render(tmpl *Template, values map[string]any, out io.Writer) 
 	if err != nil {
 		return fmt.Errorf("could not read template content: %w", err)
 	}
-	parsed, err := template.New("main").Parse(string(content))
+
+	renderer := template.New("main").Funcs(templateFuncs)
+	parsed, err := renderer.Parse(string(content))
 	if err != nil {
 		return fmt.Errorf("could not parse template: %w", err)
 	}

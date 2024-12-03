@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
@@ -64,7 +65,7 @@ func (r *rodRenderer) Render(ctx context.Context, html io.Reader, pdf io.Writer,
 	if err != nil {
 		return fmt.Errorf("failed to set HTML content: %w", err)
 	}
-	err = page.WaitLoad()
+	err = page.WaitStable(1000 * time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
@@ -74,13 +75,15 @@ func (r *rodRenderer) Render(ctx context.Context, html io.Reader, pdf io.Writer,
 	height := dumbify(opts.Height)
 	margin := 0.0
 	pdfStream, err := page.PDF(&proto.PagePrintToPDF{
-		PaperWidth:   &width,
-		PaperHeight:  &height,
-		MarginTop:    &margin,
-		MarginBottom: &margin,
-		MarginLeft:   &margin,
-		MarginRight:  &margin,
-		TransferMode: proto.PagePrintToPDFTransferModeReturnAsStream,
+		PrintBackground:   true,
+		PaperWidth:        &width,
+		PaperHeight:       &height,
+		MarginTop:         &margin,
+		MarginBottom:      &margin,
+		MarginLeft:        &margin,
+		MarginRight:       &margin,
+		PreferCSSPageSize: true,
+		TransferMode:      proto.PagePrintToPDFTransferModeReturnAsStream,
 	})
 	if err != nil {
 		return fmt.Errorf("failed generate PDF from HTML: %w", err)
