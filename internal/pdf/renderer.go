@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -39,7 +40,7 @@ func NewRodRenderer(chromium string) Renderer {
 // Render renders a PDF from HTML content
 func (r *rodRenderer) Render(ctx context.Context, html io.Reader, pdf io.Writer, opts RenderOpts) error {
 	// Launch a new browser with default options
-	l, err := launcher.New().Bin(r.chromium).Context(ctx).Launch()
+	l, err := launcher.New().Bin(r.chromium).Context(ctx).Logger(os.Stderr).Launch()
 	if err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
 	}
