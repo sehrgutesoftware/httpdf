@@ -19,7 +19,7 @@ var (
 // HTTPDF is the interface for the HTTPDF service.
 type HTTPDF interface {
 	// Generate renders a PDF from the given template and values.
-	Generate(template string, values map[string]any, out io.Writer) error
+	Generate(ctx context.Context, template string, values map[string]any, out io.Writer) error
 	// Preview renders an HTML preview of the given template with its example values.
 	Preview(template string, out io.Writer) error
 }
@@ -48,7 +48,7 @@ func New(
 }
 
 // Generate generates a PDF from the given template and values.
-func (w *httPDF) Generate(template string, values map[string]any, out io.Writer) error {
+func (w *httPDF) Generate(ctx context.Context, template string, values map[string]any, out io.Writer) error {
 	tmpl, err := w.templates.Load(template)
 	if err != nil {
 		return fmt.Errorf("failed to load template: %w", err)
@@ -63,7 +63,7 @@ func (w *httPDF) Generate(template string, values map[string]any, out io.Writer)
 		return fmt.Errorf("failed to render HTML: %w", err)
 	}
 
-	if err := w.pdfRenderer.Render(context.TODO(), html, out, pdf.RenderOpts{
+	if err := w.pdfRenderer.Render(ctx, html, out, pdf.RenderOpts{
 		Width:  tmpl.Config.Page.Width,
 		Height: tmpl.Config.Page.Height,
 	}); err != nil {

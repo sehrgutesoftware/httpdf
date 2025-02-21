@@ -33,7 +33,7 @@ func (s *server) render(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	if err := s.httpdf.Generate(r.PathValue("template"), values, w); err != nil {
+	if err := s.httpdf.Generate(r.Context(), r.PathValue("template"), values, w); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
