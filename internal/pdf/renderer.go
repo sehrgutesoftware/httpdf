@@ -40,7 +40,18 @@ func NewRodRenderer(chromium string) Renderer {
 // Render renders a PDF from HTML content
 func (r *rodRenderer) Render(ctx context.Context, html io.Reader, pdf io.Writer, opts RenderOpts) error {
 	// Launch a new browser with default options
-	l, err := launcher.New().Bin(r.chromium).Context(ctx).Logger(os.Stderr).Launch()
+	l, err := launcher.New().
+		Context(ctx).
+		Bin(r.chromium).
+		Logger(os.Stderr).
+		Headless(true).
+		Set("disable-gpu").
+		Set("disable-extensions").
+		Set("disable-dev-shm-usage").
+		Set("disable-software-rasterizer").
+		Set("no-sandbox").
+		Set("no-zygote").
+		Launch()
 	if err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
 	}
