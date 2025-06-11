@@ -1,11 +1,13 @@
 package httpdf
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
+	"net/http"
 
 	"github.com/sehrgutesoftware/httpdf/internal/pdf"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
@@ -16,56 +18,44 @@ var (
 	ErrInvalidValues = errors.New("invalid values")
 )
 
-// HTTPDF is the interface for the HTTPDF service.
+// HTTPDF is the interface for the httpdf service.
 type HTTPDF interface {
 	// Generate renders a PDF from the given template and values.
-	Generate(ctx context.Context, template string, values map[string]any, out io.Writer) error
-	// Preview renders an HTML preview of the given template with its example values.
-	Preview(template string, out io.Writer) error
+	Generate(ctx context.Context, t *template.Template, v map[string]any, w io.Writer) error
 }
 
-// httPDF is the core implementation of the httPDF service.
-type httPDF struct {
-	templates    template.Loader
-	validator    template.Validator
-	htmlRenderer template.Renderer
-	pdfRenderer  pdf.Renderer
+// httpdf is the core implementation of the httpdf service.
+type httpdf struct {
+	pdfRenderer pdf.Renderer
 }
 
 // New creates a new httpdf service.
 func New(
-	templates template.Loader,
-	validator template.Validator,
-	htmlRenderer template.Renderer,
 	pdfRenderer pdf.Renderer,
 ) HTTPDF {
-	return &httPDF{
-		templates:    templates,
-		validator:    validator,
-		htmlRenderer: htmlRenderer,
-		pdfRenderer:  pdfRenderer,
+	return &httpdf{
+		pdfRenderer: pdfRenderer,
 	}
 }
 
-// Generate generates a PDF from the given template and values.
-func (w *httPDF) Generate(ctx context.Context, template string, values map[string]any, out io.Writer) error {
-	tmpl, err := w.templates.Load(template)
-	if err != nil {
-		return fmt.Errorf("failed to load template: %w", err)
-	}
-
-	if valid := w.validator.Validate(tmpl, values); !valid.Valid {
+// Generate a PDF from the given template and values.
+func (h *httpdf) Generate(ctx context.Context, t *template.Template, v map[string]any, w io.Writer) error {
+	if valid := t.Schema.Validate(v); !valid.Valid {
 		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
 	}
 
-	html := bytes.NewBuffer(nil)
-	if err := w.htmlRenderer.Render(tmpl, values, html); err != nil {
-		return fmt.Errorf("failed to render HTML: %w", err)
+	srvCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	serverAddr, err := h.temporaryServer(srvCtx, h.serve(t, v))
+	if err != nil {
+		return fmt.Errorf("generate: %w", err)
 	}
 
-	if err := w.pdfRenderer.Render(ctx, html, out, pdf.RenderOpts{
-		Width:  tmpl.Config.Page.Width,
-		Height: tmpl.Config.Page.Height,
+	log.Printf("Starting temporary server at %s", serverAddr)
+
+	if err := h.pdfRenderer.Render(ctx, serverAddr, w, pdf.RenderOpts{
+		Width:  t.Config.Page.Width,
+		Height: t.Config.Page.Height,
 	}); err != nil {
 		return fmt.Errorf("failed to render PDF: %w", err)
 	}
@@ -73,25 +63,46 @@ func (w *httPDF) Generate(ctx context.Context, template string, values map[strin
 	return nil
 }
 
-// Preview renders an HTML preview of the given template with its example values.
-func (w *httPDF) Preview(template string, out io.Writer) error {
-	tmpl, err := w.templates.Load(template)
+func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (string, error) {
+	// Assign a random free local TCP port for the temporary server
+	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
-		return fmt.Errorf("failed to load template: %w", err)
+		return "", fmt.Errorf("temporary server: %w", err)
 	}
 
-	exampleData, err := w.templates.ExampleData(template)
-	if err != nil {
-		return fmt.Errorf("failed to load example data: %w", err)
+	server := &http.Server{
+		Handler: handler,
 	}
 
-	if valid := w.validator.Validate(tmpl, exampleData); !valid.Valid {
-		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
-	}
+	// The temporary server can be stopped by closing the context
+	go func() {
+		<-ctx.Done()
+		if err := server.Shutdown(context.Background()); err != nil {
+			fmt.Printf("failed to shutdown temporary server: %v\n", err)
+		}
+	}()
 
-	if err := w.htmlRenderer.Render(tmpl, exampleData, out); err != nil {
-		return fmt.Errorf("failed to render HTML: %w", err)
-	}
+	go func() {
+		defer listener.Close()
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			panic(err)
+		}
+	}()
 
-	return nil
+	return fmt.Sprintf("http://%s", listener.Addr().String()), nil
+}
+
+func (h *httpdf) serve(t *template.Template, v map[string]any) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(t.Assets))))
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		err := t.Render(v, "/assets", w)
+		if err != nil {
+			http.Error(w, "failed to render template", http.StatusInternalServerError)
+			return
+		}
+	})
+
+	return mux
 }

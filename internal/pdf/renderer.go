@@ -22,7 +22,7 @@ type RenderOpts struct {
 
 // Renderer is an interface for rendering PDFs from HTML content
 type Renderer interface {
-	Render(ctx context.Context, html io.Reader, pdf io.Writer, opts RenderOpts) error
+	Render(ctx context.Context, url string, pdf io.Writer, opts RenderOpts) error
 }
 
 // rodRenderer is a Renderer implementation that uses rod to render PDFs
@@ -38,7 +38,7 @@ func NewRodRenderer(chromium string) Renderer {
 }
 
 // Render renders a PDF from HTML content
-func (r *rodRenderer) Render(ctx context.Context, html io.Reader, pdf io.Writer, opts RenderOpts) error {
+func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opts RenderOpts) error {
 	// Launch a new browser with default options
 	l, err := launcher.New().
 		Context(ctx).
@@ -65,19 +65,13 @@ func (r *rodRenderer) Render(ctx context.Context, html io.Reader, pdf io.Writer,
 	}
 
 	// Load the HTML content into a new page
-	page, err := browser.Page(proto.TargetCreateTarget{})
+	page, err := browser.Page(proto.TargetCreateTarget{
+		URL: url,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create new page: %w", err)
 	}
-	htmlContent, err := io.ReadAll(html)
-	if err != nil {
-		return fmt.Errorf("failed to read HTML content: %w", err)
-	}
-	err = page.SetDocumentContent(string(htmlContent))
-	if err != nil {
-		return fmt.Errorf("failed to set HTML content: %w", err)
-	}
-	err = page.WaitStable(1000 * time.Millisecond)
+	err = page.WaitStable(50 * time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
