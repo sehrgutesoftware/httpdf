@@ -49,14 +49,12 @@ func (s *server) render(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	if err := s.httpdf.Generate(r.Context(), t, values, w); err != nil {
+	if err := s.httpdf.Generate(r.Context(), t, extractLocale(r), values, w); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
 func (s *server) preview(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-
 	assets := fmt.Sprintf("/templates/%s/assets", r.PathValue("template"))
 
 	// For the preview operation, the template is loaded each time in order to
@@ -70,7 +68,8 @@ func (s *server) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = t.Render(t.Example, assets, w)
+	w.Header().Set("Content-Type", "text/html")
+	err = t.Render(t.Example, assets, extractLocale(r), w)
 	if err != nil {
 		http.Error(w, "failed to render template: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -109,4 +108,11 @@ func (s *server) cachedTemplate(name string) (*template.Template, error) {
 
 	s.cache[name] = t
 	return t, nil
+}
+
+func extractLocale(r *http.Request) string {
+	if locale := r.URL.Query().Get("lang"); locale != "" {
+		return locale
+	}
+	return r.Header.Get("Accept-Language")
 }

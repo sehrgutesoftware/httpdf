@@ -7,6 +7,7 @@ httpdf produces a PDF file from the following inputs:
 1) an HTML template, written in go's [html/template](https://pkg.go.dev/html/template) syntax
 2) a [JSON Schema](https://json-schema.org/) describing the inputs required to render the template
 3) the actual template values as an HTTP POST request
+4) an optional `?lang=` query parameter (or `Accept-Language` header) to select a translation file
 
 It uses a headless Chromium or Firefox instance for PDF rendering, controlled via [rod](https://pkg.go.dev/github.com/go-rod/rod).
 
@@ -38,8 +39,9 @@ Mount your templates into the container under the `/templates` directory. Each t
     ├── template.html       # the HTML template itself
     ├── schema.json         # JSON Schema describing the data structure required by the template
     ├── config.yaml         # template config parameters
-    └── example.json        # (optional) example values
-    └── /assets             # (optional) static assets
+    ├── example.json        # (optional) example values
+    ├── /assets             # (optional) static assets
+    └── /locales/*.yaml     # (optional) translation files
 ```
 
 The template is identified by its folder name. In the above example, the name of the template is `example`.
@@ -54,11 +56,21 @@ The template is identified by its folder name. In the above example, the name of
 page:
     width: width of the resulting PDF in mm
     height: height of the resulting PDF in mm
+
+locale: # optional
+    locales:
+    - en
+    - de
+    default: en
 ```
 
 `example.json` can be added for testing and documentation purposes, providing some example data to render the template during template development.
 
 `assets/` is an optional directory for static assets, such as images or stylesheets. They can be referenced in the HTML template by their file name using `{{ .__assets__ }}` as a prefix, e.g. `<link rel="stylesheet" href="{{ .__assets__ }}/style.css">`.
+
+`locales/` is an optional directory for translation files. Each file must be a valid YAML file containing key-value pairs for translations. The file names must match the language codes, e.g. `en.yaml`, `de.yaml`, etc. The translations can be accessed in the HTML template using the `tr` function, e.g. `{{ tr "key" }}`. The `tr` function will accept placeholders in the translation strings. See the [example](templates/example) for usage.
+
+Only translation files for the languages defined in the `config.yaml` file will be loaded.
 
 ## Development
 

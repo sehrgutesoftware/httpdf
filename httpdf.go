@@ -21,7 +21,7 @@ var (
 // HTTPDF is the interface for the httpdf service.
 type HTTPDF interface {
 	// Generate renders a PDF from the given template and values.
-	Generate(ctx context.Context, t *template.Template, v map[string]any, w io.Writer) error
+	Generate(ctx context.Context, t *template.Template, locale string, v map[string]any, w io.Writer) error
 }
 
 // httpdf is the core implementation of the httpdf service.
@@ -39,14 +39,14 @@ func New(
 }
 
 // Generate a PDF from the given template and values.
-func (h *httpdf) Generate(ctx context.Context, t *template.Template, v map[string]any, w io.Writer) error {
+func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale string, v map[string]any, w io.Writer) error {
 	if valid := t.Schema.Validate(v); !valid.Valid {
 		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
 	}
 
 	srvCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	serverAddr, err := h.temporaryServer(srvCtx, h.serve(t, v))
+	serverAddr, err := h.temporaryServer(srvCtx, h.serve(t, locale, v))
 	if err != nil {
 		return fmt.Errorf("generate: %w", err)
 	}
@@ -57,7 +57,7 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, v map[strin
 		Width:  t.Config.Page.Width,
 		Height: t.Config.Page.Height,
 	}); err != nil {
-		return fmt.Errorf("failed to render PDF: %w", err)
+		return fmt.Errorf("render PDF: %w", err)
 	}
 
 	return nil
@@ -78,7 +78,7 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 	go func() {
 		<-ctx.Done()
 		if err := server.Shutdown(context.Background()); err != nil {
-			fmt.Printf("failed to shutdown temporary server: %v\n", err)
+			fmt.Printf("shut down temporary server: %v\n", err)
 		}
 	}()
 
@@ -92,14 +92,14 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 	return fmt.Sprintf("http://%s", listener.Addr().String()), nil
 }
 
-func (h *httpdf) serve(t *template.Template, v map[string]any) http.Handler {
+func (h *httpdf) serve(t *template.Template, locale string, v map[string]any) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(t.Assets))))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		err := t.Render(v, "/assets", w)
+		err := t.Render(v, "/assets", locale, w)
 		if err != nil {
-			http.Error(w, "failed to render template", http.StatusInternalServerError)
+			http.Error(w, "render template", http.StatusInternalServerError)
 			return
 		}
 	})

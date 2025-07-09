@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path"
 
+	"github.com/kaptinlin/go-i18n"
 	"github.com/kaptinlin/jsonschema"
 	yaml "gopkg.in/yaml.v3"
 )
@@ -31,6 +32,7 @@ type Loader interface {
 // - dir/config.yaml: The configuration file
 // - dir/schema.json: The JSON schema file
 // - dir/assets: (optional) directory containing static assets
+// - dir/locales/{locale}.yaml: (optional) translation files
 type fsLoader struct {
 	root   fs.SubFS
 	schema *jsonschema.Compiler
@@ -51,6 +53,7 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	schemaPath := path.Join(name, "schema.json")
 	assetsPath := path.Join(name, "assets")
 	examplePath := path.Join(name, "example.json")
+	localesGlob := path.Join(name, "locales", "*.yaml")
 
 	// Ensure that all required files exist. Possible TOCTOU issue here, but
 	// errors later on will still be handled – though the error message will
@@ -60,7 +63,7 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%w: missing %s", ErrTemplateNotFound, p)
 		} else if err != nil {
-			return nil, fmt.Errorf("could not stat file: %w", err)
+			return nil, fmt.Errorf("stat file: %w", err)
 		}
 	}
 
@@ -70,33 +73,33 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	// Load the config
 	configFile, err := l.root.Open(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not open config file: %w", err)
+		return nil, fmt.Errorf("open config file: %w", err)
 	}
 	defer configFile.Close()
 	err = yaml.NewDecoder(configFile).Decode(&tmpl.Config)
 	if err != nil {
-		return nil, fmt.Errorf("could not decode config file: %w", err)
+		return nil, fmt.Errorf("decode config file: %w", err)
 	}
 
 	// Load the JSON schema
 	schemaFile, err := l.root.Open(schemaPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not open schema file: %w", err)
+		return nil, fmt.Errorf("open schema file: %w", err)
 	}
 	defer schemaFile.Close()
 	schemaContent, err := io.ReadAll(schemaFile)
 	if err != nil {
-		return nil, fmt.Errorf("could not read schema file: %w", err)
+		return nil, fmt.Errorf("read schema file: %w", err)
 	}
 	tmpl.Schema, err = l.schema.Compile(schemaContent)
 	if err != nil {
-		return nil, fmt.Errorf("could not compile schema: %w", err)
+		return nil, fmt.Errorf("compile schema: %w", err)
 	}
 
 	// Load template contents
 	fh, err := l.root.Open(contentPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not open template file: %w", err)
+		return nil, fmt.Errorf("open template file: %w", err)
 	}
 	defer fh.Close()
 	tmpl.ReadFrom(fh)
@@ -105,7 +108,25 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	if stat, err := fs.Stat(l.root, assetsPath); err == nil && stat.IsDir() {
 		tmpl.Assets, err = l.root.Sub(assetsPath)
 		if err != nil {
-			return nil, fmt.Errorf("could not load assets: %w", err)
+			return nil, fmt.Errorf("load assets: %w", err)
+		}
+	}
+
+	// Load locales if they exist
+	if tmpl.Config.Locale != nil {
+		localeOpts := make([]func(*i18n.I18n), 1, 3)
+		localeOpts[0] = i18n.WithUnmarshaler(yaml.Unmarshal)
+
+		if tmpl.Config.Locale.Default != "" {
+			localeOpts = append(localeOpts, i18n.WithDefaultLocale(tmpl.Config.Locale.Default))
+		}
+		if len(tmpl.Config.Locale.Locales) > 0 {
+			localeOpts = append(localeOpts, i18n.WithLocales(tmpl.Config.Locale.Locales...))
+		}
+		tmpl.I18n = i18n.NewBundle(localeOpts...)
+		err = tmpl.I18n.LoadFS(l.root, localesGlob)
+		if err != nil {
+			return nil, fmt.Errorf("load locales: %w", err)
 		}
 	}
 
@@ -114,11 +135,11 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		tmpl.Example = nil // No example data available
 	} else if err != nil {
-		return nil, fmt.Errorf("could not open example data file: %w", err)
+		return nil, fmt.Errorf("open example data file: %w", err)
 	} else {
 		defer fd.Close()
 		if err := json.NewDecoder(fd).Decode(&tmpl.Example); err != nil {
-			return nil, fmt.Errorf("could not decode example data file: %w", err)
+			return nil, fmt.Errorf("decode example data file: %w", err)
 		}
 	}
 
