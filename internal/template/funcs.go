@@ -3,19 +3,22 @@ package template
 import (
 	"text/template"
 
+	"github.com/Masterminds/sprig/v3"
 	"github.com/kaptinlin/go-i18n"
 )
 
 func templateFuncs(localizer *i18n.Localizer) template.FuncMap {
-	return template.FuncMap{
-		"chunk": chunk,
-		"tr": func(key string, args ...any) string {
-			if localizer == nil {
-				return "!(localizer is nil)"
-			}
-			return localizer.Get(key, i18nVars(args))
-		},
+	funcs := sprig.FuncMap()
+
+	funcs["chunk"] = chunk
+	funcs["tr"] = func(key string, args ...any) string {
+		if localizer == nil {
+			return "!(localizer is nil)"
+		}
+		return localizer.Get(key, i18nVars(args))
 	}
+
+	return funcs
 }
 
 // chunk takes an array and returns an array of arrays with n elements each.

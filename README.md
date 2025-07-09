@@ -31,6 +31,8 @@ Render an HTML preview of the template using data from the template's `example.j
 
 Templates are written in go's [html/template](https://pkg.go.dev/html/template) syntax and can include any valid HTML. The template must be accompanied by a JSON Schema that describes the data structure required to render the template, as well as a configuration file defining the page layout.
 
+Besides the go template functions, [Sprig](https://masterminds.github.io/sprig/) functions are available for use in the templates.
+
 Mount your templates into the container under the `/templates` directory. Each template is a folder by itself. The structure of the folder is as follows (file names must match exactly):
 
 ```
