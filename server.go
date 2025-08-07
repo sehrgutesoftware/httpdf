@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gorilla/handlers"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 )
 
@@ -28,7 +29,13 @@ func NewServer(httpdf HTTPDF, loader template.Loader) http.Handler {
 	server.Handle("GET /templates/{template}/preview", http.HandlerFunc(server.preview))
 	server.Handle("GET /templates/{template}/assets/", http.HandlerFunc(server.assets))
 
-	return server
+	cors := handlers.CORS(
+		handlers.AllowedOrigins([]string{"*"}),
+		handlers.AllowedMethods([]string{http.MethodOptions, http.MethodGet, http.MethodPost}),
+		handlers.AllowedHeaders([]string{"Content-Type"}),
+	)
+
+	return cors(server)
 }
 
 func (s *server) render(w http.ResponseWriter, r *http.Request) {
