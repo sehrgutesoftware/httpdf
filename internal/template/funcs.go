@@ -1,13 +1,14 @@
 package template
 
 import (
+	"os"
 	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
 	"github.com/kaptinlin/go-i18n"
 )
 
-func templateFuncs(localizer *i18n.Localizer) template.FuncMap {
+func templateFuncs(localizer *i18n.Localizer, exposedEnvVars []string) template.FuncMap {
 	funcs := sprig.FuncMap()
 
 	funcs["chunk"] = chunk
@@ -17,6 +18,7 @@ func templateFuncs(localizer *i18n.Localizer) template.FuncMap {
 		}
 		return localizer.Get(key, i18nVars(args))
 	}
+	funcs["env"] = envFunc(exposedEnvVars)
 
 	return funcs
 }
@@ -56,4 +58,21 @@ func i18nVars(args []any) i18n.Vars {
 	}
 
 	return vars
+}
+
+// envFunc returns a template function that provides access to environment variables
+// only if they are in the exposedEnvVars whitelist.
+func envFunc(exposedEnvVars []string) func(string) string {
+	// Create a map for O(1) lookup of exposed variables
+	exposed := make(map[string]bool, len(exposedEnvVars))
+	for _, envVar := range exposedEnvVars {
+		exposed[envVar] = true
+	}
+
+	return func(key string) string {
+		if !exposed[key] {
+			return ""
+		}
+		return os.Getenv(key)
+	}
 }

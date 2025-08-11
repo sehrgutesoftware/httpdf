@@ -21,6 +21,7 @@ type Config struct {
 		Locales []string `yaml:"locales"`
 		Default string   `yaml:"default"`
 	} `yaml:"locale"`
+	ExposedEnvVars []string `yaml:"exposedEnvVars"`
 }
 
 // Template represents a template
@@ -41,7 +42,7 @@ func (t *Template) Render(values map[string]any, assetsPrefix string, locale str
 		values["__locale__"] = localizer.Locale()
 	}
 
-	renderer := template.New("main").Funcs(templateFuncs(localizer))
+	renderer := template.New("main").Funcs(templateFuncs(localizer, t.Config.ExposedEnvVars))
 	parsed, err := renderer.Parse(t.String())
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)

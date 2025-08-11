@@ -7,3 +7,7 @@ locale:
     - de
     - en
   default: de
+
+exposedEnvVars:
+  - HOSTNAME
+  - GOLANG_VERSION

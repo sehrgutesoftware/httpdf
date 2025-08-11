@@ -2,11 +2,13 @@ package template_test
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/kaptinlin/go-i18n"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -190,5 +192,52 @@ func TestRender(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Equal(t, "Value: default", output.String())
+	})
+
+	t.Run("it_uses_env_function_with_exposed_variables", func(t *testing.T) {
+		// Set up test environment variables
+		err := os.Setenv("EXPOSED_VAR", "secret_value")
+		require.NoError(t, err)
+		defer os.Unsetenv("EXPOSED_VAR")
+
+		err = os.Setenv("HIDDEN_VAR", "hidden_secret")
+		require.NoError(t, err)
+		defer os.Unsetenv("HIDDEN_VAR")
+
+		tmpl := &template.Template{
+			Config: template.Config{
+				ExposedEnvVars: []string{"EXPOSED_VAR"},
+			},
+		}
+		tmpl.WriteString("Exposed: {{env \"EXPOSED_VAR\"}}, Hidden: {{env \"HIDDEN_VAR\"}}, Missing: {{env \"MISSING_VAR\"}}")
+
+		var output bytes.Buffer
+		values := map[string]any{}
+
+		err = tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "Exposed: secret_value, Hidden: , Missing: ", output.String())
+	})
+
+	t.Run("it_handles_env_function_with_empty_exposed_list", func(t *testing.T) {
+		err := os.Setenv("ANY_VAR", "any_value")
+		require.NoError(t, err)
+		defer os.Unsetenv("ANY_VAR")
+
+		tmpl := &template.Template{
+			Config: template.Config{
+				ExposedEnvVars: []string{},
+			},
+		}
+		tmpl.WriteString("Value: {{env \"ANY_VAR\"}}")
+
+		var output bytes.Buffer
+		values := map[string]any{}
+
+		err = tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "Value: ", output.String())
 	})
 }

@@ -31,7 +31,7 @@ Render an HTML preview of the template using data from the template's `example.j
 
 Templates are written in go's [html/template](https://pkg.go.dev/html/template) syntax and can include any valid HTML. The template must be accompanied by a JSON Schema that describes the data structure required to render the template, as well as a configuration file defining the page layout.
 
-Besides the go template functions, [Sprig](https://masterminds.github.io/sprig/) functions are available for use in the templates.
+#### Template Structure
 
 Mount your templates into the container under the `/templates` directory. Each template is a folder by itself. The structure of the folder is as follows (file names must match exactly):
 
@@ -64,6 +64,10 @@ locale: # optional
     - en
     - de
     default: en
+
+exposedEnvVars: # optional; list of env vars available in the template
+    - IMAGE_PROXY_URL
+    - LANG
 ```
 
 `example.json` can be added for testing and documentation purposes, providing some example data to render the template during template development.
@@ -73,6 +77,29 @@ locale: # optional
 `locales/` is an optional directory for translation files. Each file must be a valid YAML file containing key-value pairs for translations. The file names must match the language codes, e.g. `en.yaml`, `de.yaml`, etc. The translations can be accessed in the HTML template using the `tr` function, e.g. `{{ tr "key" }}`. The `tr` function will accept placeholders in the translation strings. See the [example](templates/example) for usage.
 
 Only translation files for the languages defined in the `config.yaml` file will be loaded.
+
+
+#### Template Functions
+
+In addition to go's standard template functions, [Sprig](https://masterminds.github.io/sprig/) functions are available for use in the templates.
+
+Furthermore, httpdf provides these custom template functions:
+
+- `chunk`: Takes an array and returns an array of arrays with n elements each. Usage: `{{ chunk .items 2 }}`
+- `tr`: Translation function for internationalized templates. Usage: `{{ tr "key" "arg1" "value1" }}`
+- `env`: Access environment variables (security-controlled). Usage: `{{ env "VAR_NAME" }}`
+
+##### Environment Variables (`env` function)
+
+The `env` function provides controlled access to environment variables within templates. For security reasons, only environment variables explicitly listed in the template's `exposedEnvVars` configuration can be accessed.
+
+Example usage in template:
+```html
+<p>Image proxy URL: {{ env "IMAGE_PROXY_URL" }}</p>
+<p>Language: {{ env "LANG" }}</p>
+```
+
+If an environment variable is not in the exposed list or isn't set, the function returns an empty string. You can use the `default` function to provide fallback values.
 
 ## Development
 

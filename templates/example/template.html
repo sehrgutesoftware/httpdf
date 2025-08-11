@@ -14,7 +14,23 @@
                     <li>{{ .name }}: {{ printf "%.2f" .amount }}</li>
                 {{ end }}
             </ul>
-            <small>Locale: {{ .__locale__ }}</small>
+
+            <div>
+                <h3>Env Info</h3>
+                <p>
+                    HOSTNAME: {{ env "HOSTNAME" | default "unknown" }}<br />
+                    GOLANG_VERSION:
+                    {{ env "GOLANG_VERSION" | default "unknown" }}<br />
+                </p>
+            </div>
+
+            <div>
+                <h3>i18n Info</h3>
+                <p>
+                    Locale:
+                    {{ .__locale__ }}
+                </p>
+            </div>
         </div>
     </body>
 </html>
