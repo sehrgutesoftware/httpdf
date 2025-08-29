@@ -1,2 +1,8 @@
 title: httpdf example document
 created_at: "Created at {date}"
+items_list: "Items List"
+env_info: "Environment Information"
+i18n_info: "Internationalization Info"
+welcome_message: "Welcome to {name}!"
+sprig_demo: "Sprig Functions Demo"
+hello: "Hello!"

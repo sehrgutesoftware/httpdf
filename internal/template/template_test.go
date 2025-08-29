@@ -28,12 +28,12 @@ func TestRender(t *testing.T) {
 
 	t.Run("it_includes_assets_prefix_in_template_context", func(t *testing.T) {
 		tmpl := &template.Template{}
-		tmpl.WriteString("Assets at: {{.__assets__}}")
+		tmpl.WriteString("Assets at: {{asset \"assets\"}}")
 
 		var output bytes.Buffer
 		values := map[string]any{}
 
-		err := tmpl.Render(values, "/static/assets", "en", &output)
+		err := tmpl.Render(values, "/static", "en", &output)
 
 		assert.NoError(t, err)
 		assert.Equal(t, "Assets at: /static/assets", output.String())
@@ -118,7 +118,7 @@ func TestRender(t *testing.T) {
 		tmpl := &template.Template{
 			I18n: i18nInstance,
 		}
-		tmpl.WriteString("Locale: {{.__locale__}}")
+		tmpl.WriteString("Locale: {{locale}}")
 
 		var output bytes.Buffer
 		values := map[string]any{}
@@ -146,7 +146,7 @@ func TestRender(t *testing.T) {
 
 	t.Run("it_renders_complex_template_with_multiple_features", func(t *testing.T) {
 		tmpl := &template.Template{}
-		tmpl.WriteString(`Assets: {{.__assets__}}
+		tmpl.WriteString(`Assets: {{asset "assets"}}
 {{- $items := .items -}}
 {{- $chunks := chunk $items 2 -}}
 {{range $chunks}}Items: {{. | join ", "}}
@@ -158,11 +158,11 @@ func TestRender(t *testing.T) {
 			"items": []any{"apple", "banana", "cherry", "date"},
 		}
 
-		err := tmpl.Render(values, "/my-assets", "en", &output)
+		err := tmpl.Render(values, "/my", "en", &output)
 
 		assert.NoError(t, err)
 		result := output.String()
-		assert.Contains(t, result, "Assets: /my-assets")
+		assert.Contains(t, result, "Assets: /my/assets")
 		assert.Contains(t, result, "Items: apple, banana")
 		assert.Contains(t, result, "Items: cherry, date")
 		assert.Contains(t, result, "Name: John Doe")

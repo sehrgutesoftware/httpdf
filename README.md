@@ -72,22 +72,52 @@ exposedEnvVars: # optional; list of env vars available in the template
 
 `example.json` can be added for testing and documentation purposes, providing some example data to render the template during template development.
 
-`assets/` is an optional directory for static assets, such as images or stylesheets. They can be referenced in the HTML template by their file name using `{{ .__assets__ }}` as a prefix, e.g. `<link rel="stylesheet" href="{{ .__assets__ }}/style.css">`.
+`assets/` is an optional directory for static assets, such as images or stylesheets. They can be referenced in the HTML template using the `asset` function, e.g. `<link rel="stylesheet" href="{{ asset "style.css" }}">` or `<img src="{{ asset "images" "logo.png" }}">`.
 
-`locales/` is an optional directory for translation files. Each file must be a valid YAML file containing key-value pairs for translations. The file names must match the language codes, e.g. `en.yaml`, `de.yaml`, etc. The translations can be accessed in the HTML template using the `tr` function, e.g. `{{ tr "key" }}`. The `tr` function will accept placeholders in the translation strings. See the [example](templates/example) for usage.
+`locales/` is an optional directory for translation files. Each file must be a valid YAML file containing key-value pairs for translations. The file names must match the language codes, e.g. `en.yaml`, `de.yaml`, etc. The translations can be accessed in the HTML template using the `tr` function, e.g. `{{ tr "key" }}`. The `tr` function will accept placeholders in the translation strings. The current locale can be accessed using `{{ locale }}`. See the [example](templates/example) for usage.
 
 Only translation files for the languages defined in the `config.yaml` file will be loaded.
 
 
 #### Template Functions
 
-In addition to go's standard template functions, [Sprig](https://masterminds.github.io/sprig/) functions are available for use in the templates.
-
-Furthermore, httpdf provides these custom template functions:
-
+**Base Functions (always available):**
+- All [Go template functions](https://pkg.go.dev/text/template#hdr-Functions) for basic operations
+- All [Sprig](https://masterminds.github.io/sprig/) functions for general template operations
+- `asset`: Generate asset URLs with the configured assets prefix. Usage: `{{ asset "style.css" }}` or `{{ asset "images" "logo.png" }}`
 - `chunk`: Takes an array and returns an array of arrays with n elements each. Usage: `{{ chunk .items 2 }}`
+
+**Internationalization Functions (when locale config is present):**
+- `locale`: Returns the current locale string. Usage: `{{ locale }}`
 - `tr`: Translation function for internationalized templates. Usage: `{{ tr "key" "arg1" "value1" }}`
+- `trLocale`: Translation function with explicit locale. Usage: `{{ trLocale "de" "key" "arg1" "value1" }}`
+
+**Environment Variable Functions (when exposedEnvVars is configured):**
 - `env`: Access environment variables (security-controlled). Usage: `{{ env "VAR_NAME" }}`
+
+##### Asset Management (`asset` function)
+
+The `asset` function generates URLs for static assets with the configured assets prefix. This function takes one or more path segments and joins them with the assets prefix.
+
+Example usage in template:
+```html
+<link rel="stylesheet" href="{{ asset "style.css" }}">
+<img src="{{ asset "images" "logo.png" }}" alt="Logo">
+<script src="{{ asset "js" "lib" "jquery.js" }}"></script>
+```
+
+##### Internationalization Functions
+
+- `locale`: Returns the current locale string (e.g., "en", "de")
+- `tr`: Translates a key using the current locale with optional parameters
+- `trLocale`: Translates a key using a specific locale with optional parameters
+
+Example usage:
+```html
+<p>Current language: {{ locale }}</p>
+<h1>{{ tr "welcome_message" "name" .userName }}</h1>
+<p>German greeting: {{ trLocale "de" "hello" }}</p>
+```
 
 ##### Environment Variables (`env` function)
 
@@ -100,6 +130,33 @@ Example usage in template:
 ```
 
 If an environment variable is not in the exposed list or isn't set, the function returns an empty string. You can use the `default` function to provide fallback values.
+
+## Migration Guide
+
+### Breaking Changes in v0.7
+The `{{ .__assets__ }}` and `{{ .__locale__ }}` template variables have been replaced with the `asset` and `locale` functions. If you're upgrading from a previous version of httpdf, you may need to update your templates to use the new function-based API:
+
+### Asset references
+```html
+<!-- Old API -->
+<link rel="stylesheet" href="{{ .__assets__ }}/style.css">
+<img src="{{ .__assets__ }}/images/logo.png">
+
+<!-- New API -->
+<link rel="stylesheet" href="{{ asset "style.css" }}">
+<img src="{{ asset "images" "logo.png" }}">
+```
+
+### Locale access
+```html
+<!-- Old API -->
+<p>Current locale: {{ .__locale__ }}</p>
+
+<!-- New API -->
+<p>Current locale: {{ locale }}</p>
+```
+
+The new API provides better flexibility for asset path construction and clearer function semantics. All other template functions remain unchanged.
 
 ## Development
 

@@ -8,6 +8,9 @@ locale:
     - en
   default: de
 
+# Environment variables that templates are allowed to access via the env function
+# Only variables listed here can be accessed in templates for security reasons
 exposedEnvVars:
   - HOSTNAME
   - GOLANG_VERSION
+  # - SECRET_KEY  # This is intentionally commented out for security demo

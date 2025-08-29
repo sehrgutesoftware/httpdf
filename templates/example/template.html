@@ -2,35 +2,62 @@
     <head>
         <meta charset="UTF-8" />
         <title>{{ tr "title" }}</title>
-        <link rel="stylesheet" href="{{ .__assets__ }}/style.css" />
+        <link rel="stylesheet" href="{{ asset "style.css" }}" />
     </head>
     <body>
         <div class="page">
-            <img src="{{ .__assets__ }}/httpdf.png" alt="" />
+            <!-- Asset function demo -->
+            <img src="{{ asset "httpdf.png" }}" alt="httpdf logo" />
+
+            <!-- Basic template data -->
             <h1>{{ .title }}</h1>
             <p>{{ tr "created_at" "date" .date }}</p>
-            <ul>
-                {{ range .list }}
-                    <li>{{ .name }}: {{ printf "%.2f" .amount }}</li>
-                {{ end }}
-            </ul>
 
-            <div>
-                <h3>Env Info</h3>
+            <!-- Chunk function demo -->
+            <h2>{{ tr "items_list" }}</h2>
+            {{ $chunks := chunk .list 2 }}
+            {{ range $chunks }}
+                <div class="row">
+                    {{ range . }}
+                        <div class="item">
+                            {{ .name }}:
+                            {{ printf "%.2f" .amount }}
+                        </div>
+                    {{ end }}
+                </div>
+            {{ end }}
+
+
+            <section>
+                <h3>{{ tr "env_info" }}</h3>
                 <p>
                     HOSTNAME: {{ env "HOSTNAME" | default "unknown" }}<br />
                     GOLANG_VERSION:
                     {{ env "GOLANG_VERSION" | default "unknown" }}<br />
+                    <!-- This should be empty for security -->
+                    SECRET (should be empty): "{{ env "SECRET_KEY" }}"
                 </p>
-            </div>
+            </section>
 
-            <div>
-                <h3>i18n Info</h3>
+            <section>
+                <h3>{{ tr "i18n_info" }}</h3>
+                <p>Current locale: {{ locale }}</p>
+                <p>{{ tr "welcome_message" "name" "httpdf" }}</p>
+                <!-- Demo of specific locale translation -->
+                <p>German greeting: {{ trLocale "de" "hello" }}</p>
+                <p>English greeting: {{ trLocale "en" "hello" }}</p>
+            </section>
+
+            <section>
+                <h3>{{ tr "sprig_demo" }}</h3>
+                <p>Uppercase title: {{ .title | upper }}</p>
+                <p>Random number: {{ randNumeric 5 }}</p>
+                <p>Current date: {{ now | date "2006-01-02" }}</p>
                 <p>
-                    Locale:
-                    {{ .__locale__ }}
+                    Template name slug:
+                    {{ .title | lower | replace " " "-" }}
                 </p>
-            </div>
+            </section>
         </div>
     </body>
 </html>

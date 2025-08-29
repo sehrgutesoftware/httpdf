@@ -34,6 +34,8 @@
     box-sizing: border-box;
     page-break-after: always;
     background-size: cover;
+    font-family: Arial, sans-serif;
+    line-height: 1.4;
 }
 
 body {
@@ -43,5 +45,60 @@ body {
 h1 {
     font-size: 24pt;
     font-weight: bold;
-    margin: 0;
+    margin: 0 0 10mm 0;
+    color: #333;
+}
+
+h2 {
+    font-size: 16pt;
+    font-weight: bold;
+    margin: 8mm 0 4mm 0;
+    color: #444;
+}
+
+h3 {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #555;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 2mm;
+}
+
+p {
+    margin: 2mm 0;
+}
+
+img {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 5mm;
+}
+
+.row {
+    display: flex;
+    margin: 2mm 0;
+    gap: 5mm;
+}
+
+.item {
+    flex: 1;
+    padding: 3mm;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 2mm;
+}
+
+section {
+    margin: 4mm 0;
+    padding: 4mm;
+    background-color: #f1f3f4;
+    border-left: 3mm solid #ffc107;
+}
+
+footer {
+    margin-top: 10mm;
+    padding-top: 5mm;
+    border-top: 1px solid #ddd;
+    font-size: 10pt;
+    color: #666;
 }

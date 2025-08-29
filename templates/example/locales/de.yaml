@@ -1,2 +1,8 @@
 title: httpdf Beispiel-Dokument
 created_at: "Erzeugt am {date}"
+items_list: "Artikelliste"
+env_info: "Umgebungsinformationen"
+i18n_info: "Internationalisierungs-Info"
+welcome_message: "Willkommen bei {name}!"
+sprig_demo: "Sprig-Funktionen Demo"
+hello: "Hallo!"
