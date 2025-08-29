@@ -54,8 +54,10 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 	log.Printf("Starting temporary server at %s", serverAddr)
 
 	if err := h.pdfRenderer.Render(ctx, serverAddr, w, pdf.RenderOpts{
-		Width:  t.Config.Page.Width,
-		Height: t.Config.Page.Height,
+		Width:                   t.Config.Page.Width,
+		Height:                  t.Config.Page.Height,
+		GenerateTaggedPDF:       t.Config.PDF.GenerateTaggedPDF,
+		GenerateDocumentOutline: t.Config.PDF.GenerateDocumentOutline,
 	}); err != nil {
 		return fmt.Errorf("render PDF: %w", err)
 	}

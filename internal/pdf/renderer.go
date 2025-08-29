@@ -18,6 +18,12 @@ type RenderOpts struct {
 	Width float64
 	// The height of the PDF page in mm
 	Height float64
+	// GenerateTaggedPDF indicates whether to generate a tagged PDF, see
+	// https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-printToPDF
+	GenerateTaggedPDF bool
+	// GenerateDocumentOutline indicates whether to generate a document outline,
+	// see https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-printToPDF
+	GenerateDocumentOutline bool
 }
 
 // Renderer is an interface for rendering PDFs from HTML content
@@ -81,15 +87,17 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	height := dumbify(opts.Height)
 	margin := 0.0
 	pdfStream, err := page.PDF(&proto.PagePrintToPDF{
-		PrintBackground:   true,
-		PaperWidth:        &width,
-		PaperHeight:       &height,
-		MarginTop:         &margin,
-		MarginBottom:      &margin,
-		MarginLeft:        &margin,
-		MarginRight:       &margin,
-		PreferCSSPageSize: true,
-		TransferMode:      proto.PagePrintToPDFTransferModeReturnAsStream,
+		PrintBackground:         true,
+		PaperWidth:              &width,
+		PaperHeight:             &height,
+		MarginTop:               &margin,
+		MarginBottom:            &margin,
+		MarginLeft:              &margin,
+		MarginRight:             &margin,
+		PreferCSSPageSize:       true,
+		TransferMode:            proto.PagePrintToPDFTransferModeReturnAsStream,
+		GenerateTaggedPDF:       opts.GenerateTaggedPDF,
+		GenerateDocumentOutline: opts.GenerateDocumentOutline,
 	})
 	if err != nil {
 		return fmt.Errorf("failed generate PDF from HTML: %w", err)

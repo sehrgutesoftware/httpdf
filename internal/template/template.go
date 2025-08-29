@@ -22,6 +22,10 @@ type Config struct {
 		Default string   `yaml:"default"`
 	} `yaml:"locale"`
 	ExposedEnvVars []string `yaml:"exposedEnvVars"`
+	PDF            struct {
+		GenerateTaggedPDF       bool `yaml:"generateTaggedPDF"`
+		GenerateDocumentOutline bool `yaml:"generateDocumentOutline"`
+	} `yaml:"pdf"`
 }
 
 // Template represents a template
