@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
@@ -36,15 +37,27 @@ func NewClient(baseURL string, opts ...ClientOption) *Client {
 }
 
 // Render given template using the provided values
-func (c *Client) Render(ctx context.Context, template string, values any) (io.ReadCloser, error) {
-	url := c.baseURL + "/" + path.Join("templates", template, "render")
+func (c *Client) Render(ctx context.Context, template string, values any, lang ...string) (io.ReadCloser, error) {
+	u := c.baseURL + "/" + path.Join("templates", template, "render")
+
+	// Add lang query parameter if provided
+	if len(lang) > 0 && lang[0] != "" {
+		parsedURL, err := url.Parse(u)
+		if err != nil {
+			return nil, fmt.Errorf("render template: %w", err)
+		}
+		q := parsedURL.Query()
+		q.Set("lang", lang[0])
+		parsedURL.RawQuery = q.Encode()
+		u = parsedURL.String()
+	}
 
 	body := bytes.NewBuffer(nil)
 	if err := json.NewEncoder(body).Encode(values); err != nil {
 		return nil, fmt.Errorf("render template: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, body)
 	if err != nil {
 		return nil, fmt.Errorf("render template: %w", err)
 	}

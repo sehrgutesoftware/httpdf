@@ -74,6 +74,135 @@ func TestClient_Render(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("it_renders_template_with_lang_query_parameter", func(t *testing.T) {
+		expectedResponse := []byte("rendered PDF content in German")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify request method and path
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/templates/test-template/render", r.URL.Path)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			// Verify lang query parameter
+			assert.Equal(t, "de", r.URL.Query().Get("lang"))
+
+			// Verify request body
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+
+			var requestData map[string]any
+			err = json.Unmarshal(body, &requestData)
+			require.NoError(t, err)
+			assert.Equal(t, "World", requestData["name"])
+
+			// Send successful response
+			w.WriteHeader(http.StatusOK)
+			w.Write(expectedResponse)
+		}))
+		defer server.Close()
+
+		client := httpdf.NewClient(server.URL)
+		values := map[string]any{"name": "World"}
+
+		result, err := client.Render(context.Background(), "test-template", values, "de")
+		defer result.Close()
+
+		assert.NoError(t, err)
+
+		// Read and verify response content
+		content, err := io.ReadAll(result)
+		require.NoError(t, err)
+		assert.Equal(t, expectedResponse, content)
+
+		// Close the response body
+		err = result.Close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("it_renders_template_without_lang_when_empty_string_provided", func(t *testing.T) {
+		expectedResponse := []byte("rendered PDF content")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify request method and path
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/templates/test-template/render", r.URL.Path)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			// Verify no lang query parameter when empty string is provided
+			assert.Empty(t, r.URL.Query().Get("lang"))
+
+			// Send successful response
+			w.WriteHeader(http.StatusOK)
+			w.Write(expectedResponse)
+		}))
+		defer server.Close()
+
+		client := httpdf.NewClient(server.URL)
+		values := map[string]any{"name": "World"}
+
+		result, err := client.Render(context.Background(), "test-template", values, "")
+		defer result.Close()
+
+		assert.NoError(t, err)
+
+		// Read and verify response content
+		content, err := io.ReadAll(result)
+		require.NoError(t, err)
+		assert.Equal(t, expectedResponse, content)
+
+		// Close the response body
+		err = result.Close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("it_renders_template_with_multiple_lang_parameters_uses_first", func(t *testing.T) {
+		expectedResponse := []byte("rendered PDF content")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify only first lang parameter is used
+			assert.Equal(t, "en", r.URL.Query().Get("lang"))
+
+			// Send successful response
+			w.WriteHeader(http.StatusOK)
+			w.Write(expectedResponse)
+		}))
+		defer server.Close()
+
+		client := httpdf.NewClient(server.URL)
+		values := map[string]any{"name": "World"}
+
+		result, err := client.Render(context.Background(), "test-template", values, "en", "de", "fr")
+		defer result.Close()
+
+		assert.NoError(t, err)
+
+		// Close the response body
+		err = result.Close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("it_handles_special_characters_in_lang_parameter", func(t *testing.T) {
+		expectedResponse := []byte("rendered PDF content")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Verify lang parameter with special characters is properly encoded
+			assert.Equal(t, "zh-CN", r.URL.Query().Get("lang"))
+
+			// Send successful response
+			w.WriteHeader(http.StatusOK)
+			w.Write(expectedResponse)
+		}))
+		defer server.Close()
+
+		client := httpdf.NewClient(server.URL)
+		values := map[string]any{"name": "World"}
+
+		result, err := client.Render(context.Background(), "test-template", values, "zh-CN")
+		defer result.Close()
+
+		assert.NoError(t, err)
+
+		// Close the response body
+		err = result.Close()
+		assert.NoError(t, err)
+	})
+
 	t.Run("it_renders_template_with_nil_values", func(t *testing.T) {
 		expectedResponse := []byte("rendered PDF content")
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
