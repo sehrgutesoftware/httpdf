@@ -1,6 +1,7 @@
 package template
 
 import (
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -403,4 +404,161 @@ func TestEnvFunctionOverride(t *testing.T) {
 	envTemplateFuncs(allowedFuncs, []string{"TEST_OVERRIDE"})
 	allowedEnvFunc := allowedFuncs["env"].(func(string) string)
 	assert.Equal(t, "secret_value", allowedEnvFunc("TEST_OVERRIDE")) // Should be allowed
+}
+func TestQrCodeFunc(t *testing.T) {
+	tests := []struct {
+		name         string
+		size         int
+		data         string
+		expectedSize int // The size we expect to be used (after default handling)
+	}{
+		{
+			name:         "positive size with simple data",
+			size:         128,
+			data:         "Hello World",
+			expectedSize: 128,
+		},
+		{
+			name:         "zero size uses default",
+			size:         0,
+			data:         "Test Data",
+			expectedSize: 256, // default size
+		},
+		{
+			name:         "negative size uses default",
+			size:         -10,
+			data:         "Test Data",
+			expectedSize: 256, // default size
+		},
+		{
+			name:         "large size",
+			size:         512,
+			data:         "Large QR Code",
+			expectedSize: 512,
+		},
+		{
+			name:         "empty data",
+			size:         100,
+			data:         "",
+			expectedSize: 100,
+		},
+		{
+			name:         "special characters",
+			size:         200,
+			data:         "Hello! @#$%^&*()_+ 世界",
+			expectedSize: 200,
+		},
+		{
+			name:         "URL data",
+			size:         150,
+			data:         "https://example.com/path?param=value",
+			expectedSize: 150,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := qrCodeFunc(tt.size, tt.data)
+
+			// Check that result starts with the correct data URL prefix
+			assert.True(t, strings.HasPrefix(result, "data:image/png;base64,"),
+				"QR code should return a PNG data URL")
+
+			// Extract and validate base64 part
+			base64Part := strings.TrimPrefix(result, "data:image/png;base64,")
+			assert.NotEmpty(t, base64Part, "Base64 part should not be empty")
+
+			// Verify that the base64 is valid
+			decodedData, err := base64.RawStdEncoding.DecodeString(base64Part)
+			require.NoError(t, err, "Base64 should be valid")
+			assert.NotEmpty(t, decodedData, "Decoded data should not be empty")
+
+			// Check that it's a valid PNG by checking the PNG signature
+			// PNG files start with these 8 bytes: 137 80 78 71 13 10 26 10
+			if len(decodedData) >= 8 {
+				pngSignature := []byte{137, 80, 78, 71, 13, 10, 26, 10}
+				assert.Equal(t, pngSignature, decodedData[:8],
+					"Decoded data should have PNG signature")
+			}
+		})
+	}
+}
+
+func TestQrCodeFuncInTemplate(t *testing.T) {
+	// Create template with barcode function
+	funcs := templateFuncs("")
+	barcodeTemplateFuncs(funcs)
+
+	// Check that qrCode function is available
+	assert.NotNil(t, funcs["qrCode"])
+
+	tmpl := template.New("test").Funcs(funcs)
+	tmpl, err := tmpl.Parse(`
+QR Small: {{qrCode 64 "Small QR"}}
+QR Default: {{qrCode 0 "Default Size"}}
+QR Large: {{qrCode 256 "Large QR Code"}}
+QR URL: {{qrCode 128 "https://example.com"}}
+`)
+	require.NoError(t, err)
+
+	var result strings.Builder
+	err = tmpl.Execute(&result, nil)
+	require.NoError(t, err)
+
+	output := result.String()
+
+	// Check that all QR codes are generated as proper data URLs
+	assert.Contains(t, output, "QR Small: data:image/png;base64,")
+	assert.Contains(t, output, "QR Default: data:image/png;base64,")
+	assert.Contains(t, output, "QR Large: data:image/png;base64,")
+	assert.Contains(t, output, "QR URL: data:image/png;base64,")
+
+	// Verify that we have different base64 content for different inputs
+	lines := strings.Split(output, "\n")
+	qrLines := make([]string, 0)
+	for _, line := range lines {
+		if strings.Contains(line, "data:image/png;base64,") {
+			qrLines = append(qrLines, line)
+		}
+	}
+
+	// Should have 4 different QR codes
+	assert.Len(t, qrLines, 4)
+
+	// Extract base64 parts and verify they're different
+	base64Parts := make([]string, len(qrLines))
+	for i, line := range qrLines {
+		parts := strings.Split(line, "data:image/png;base64,")
+		require.Len(t, parts, 2, "Should have exactly one data URL per line")
+		base64Parts[i] = strings.TrimSpace(parts[1])
+
+		// Verify each base64 is valid
+		_, err := base64.RawStdEncoding.DecodeString(base64Parts[i])
+		assert.NoError(t, err, "Base64 should be valid for line: %s", line)
+	}
+
+	// Verify they're all different (different data should produce different QR codes)
+	for i := 0; i < len(base64Parts); i++ {
+		for j := i + 1; j < len(base64Parts); j++ {
+			assert.NotEqual(t, base64Parts[i], base64Parts[j],
+				"Different QR code data should produce different base64")
+		}
+	}
+}
+
+func TestBarcodeTemplateFuncsIntegration(t *testing.T) {
+	// Create base functions and add barcode functions
+	funcs := templateFuncs("")
+	barcodeTemplateFuncs(funcs)
+
+	// Check that qrCode function is properly added
+	assert.NotNil(t, funcs["qrCode"])
+
+	// Verify the function signature
+	qrCodeFunc, ok := funcs["qrCode"].(func(int, string) string)
+	assert.True(t, ok, "qrCode function should have correct signature")
+
+	// Test the function directly
+	result := qrCodeFunc(100, "test")
+	assert.True(t, strings.HasPrefix(result, "data:image/png;base64,"))
 }

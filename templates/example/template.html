@@ -28,6 +28,12 @@
             {{ end }}
 
 
+            <!-- QR function demo -->
+            <section>
+                <h3>{{ tr "qr_code" }}</h3>
+                <img src="{{ "scan me" | qrCode 150 }}" alt="scan me" />
+            </section>
+
             <section>
                 <h3>{{ tr "env_info" }}</h3>
                 <p>

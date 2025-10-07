@@ -43,6 +43,7 @@ func (t *Template) Render(values map[string]any, assetsPrefix string, locale str
 	funcs := templateFuncs(assetsPrefix)
 	i18nTemplateFuncs(funcs, t.I18n, locale)
 	envTemplateFuncs(funcs, t.Config.ExposedEnvVars)
+	barcodeTemplateFuncs(funcs)
 
 	renderer := template.New("main").Funcs(funcs)
 	parsed, err := renderer.Parse(t.String())

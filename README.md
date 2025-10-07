@@ -81,21 +81,14 @@ Only translation files for the languages defined in the `config.yaml` file will 
 
 #### Template Functions
 
-**Base Functions (always available):**
+##### Base Functions
+
 - All [Go template functions](https://pkg.go.dev/text/template#hdr-Functions) for basic operations
 - All [Sprig](https://masterminds.github.io/sprig/) functions for general template operations
 - `asset`: Generate asset URLs with the configured assets prefix. Usage: `{{ asset "style.css" }}` or `{{ asset "images" "logo.png" }}`
 - `chunk`: Takes an array and returns an array of arrays with n elements each. Usage: `{{ chunk .items 2 }}`
 
-**Internationalization Functions (when locale config is present):**
-- `locale`: Returns the current locale string. Usage: `{{ locale }}`
-- `tr`: Translation function for internationalized templates. Usage: `{{ tr "key" "arg1" "value1" }}`
-- `trLocale`: Translation function with explicit locale. Usage: `{{ trLocale "de" "key" "arg1" "value1" }}`
-
-**Environment Variable Functions (when exposedEnvVars is configured):**
-- `env`: Access environment variables (security-controlled). Usage: `{{ env "VAR_NAME" }}`
-
-##### Asset Management (`asset` function)
+##### Asset URL (`asset` function)
 
 The `asset` function generates URLs for static assets with the configured assets prefix. This function takes one or more path segments and joins them with the assets prefix.
 
@@ -112,7 +105,7 @@ Example usage in template:
 - `tr`: Translates a key using the current locale with optional parameters
 - `trLocale`: Translates a key using a specific locale with optional parameters
 
-Example usage:
+Example usage in template:
 ```html
 <p>Current language: {{ locale }}</p>
 <h1>{{ tr "welcome_message" "name" .userName }}</h1>
@@ -130,6 +123,28 @@ Example usage in template:
 ```
 
 If an environment variable is not in the exposed list or isn't set, the function returns an empty string. You can use the `default` function to provide fallback values.
+
+##### QR Code Generation (`qrCode` function)
+
+The `qrCode` function generates QR codes and returns them as base64-encoded PNG data URLs that can be directly embedded in HTML `<img>` tags. The function takes two parameters: size (in pixels) and the data to encode.
+
+Example usage in template:
+```html
+<!-- Generate a 128x128 pixel QR code for a URL -->
+<img src="{{ qrCode 128 "https://example.com" }}" alt="QR Code">
+
+<!-- Generate a QR code for text data -->
+<img src="{{ qrCode 200 .contactInfo }}" alt="Contact QR Code">
+
+<!-- Generate a QR code with default size (256x256) -->
+<img src="{{ .data | qrCode 0 }}" alt="Data QR Code">
+```
+
+Parameters:
+- `size` (int): Width and height of the QR code in pixels. If 0 or negative, defaults to 256 pixels
+- `data` (string): The text data to encode in the QR code
+
+The function returns a complete data URL string in the format `data:image/png;base64,<encoded-data>` that can be used directly as an image source.
 
 ## Migration Guide
 
