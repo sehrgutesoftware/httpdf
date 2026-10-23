@@ -25,6 +25,7 @@ func NewServer(httpdf HTTPDF, loader template.Loader) http.Handler {
 		cache:    make(map[string]*template.Template),
 	}
 
+	server.Handle("GET /healthz", http.HandlerFunc(server.healthz))
 	server.Handle("POST /templates/{template}/render", http.HandlerFunc(server.render))
 	server.Handle("GET /templates/{template}/preview", http.HandlerFunc(server.preview))
 	server.Handle("GET /templates/{template}/assets/", http.HandlerFunc(server.assets))
@@ -36,6 +37,12 @@ func NewServer(httpdf HTTPDF, loader template.Loader) http.Handler {
 	)
 
 	return cors(server)
+}
+
+func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
 func (s *server) render(w http.ResponseWriter, r *http.Request) {

@@ -25,6 +25,9 @@ Render the template using the JSON-encoded data provided in the request body. Su
 #### `GET /templates/{template}/preview`
 Render an HTML preview of the template using data from the template's `example.json` file. Useful for template development. The preview endpoint reads the template from disk on each request, so you can test changes without restarting the server.
 
+#### `GET /healthz`
+Health check endpoint for Kubernetes probes. Returns `200 OK` as long as the HTTP server is running. Suitable for both liveness and readiness probes.
+
 ### Template Development
 
 > Check the [templates/example](./templates/example/) directory for an example template.
