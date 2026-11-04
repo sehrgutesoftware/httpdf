@@ -2,6 +2,7 @@ package pdf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,8 +35,9 @@ type Renderer interface {
 
 // rodRenderer is a Renderer implementation that uses rod to render PDFs
 type rodRenderer struct {
-	chromium string
-	logger   *slog.Logger
+	chromium      string
+	creatorPrefix string
+	logger        *slog.Logger
 }
 
 // NewRodRenderer creates a new rodRenderer
@@ -62,6 +64,15 @@ type RodRendererOption func(*rodRenderer)
 func WithLogger(logger *slog.Logger) RodRendererOption {
 	return func(r *rodRenderer) {
 		r.logger = logger
+	}
+}
+
+// WithCreatorPrefix prefixes the Creator in the PDFs' document information,
+// separated by a space, e.g. "httpdf/1.0.0" turns "Chromium" into
+// "httpdf/1.0.0 Chromium". Prefix must be printable ASCII.
+func WithCreatorPrefix(prefix string) RodRendererOption {
+	return func(r *rodRenderer) {
+		r.creatorPrefix = prefix
 	}
 }
 
@@ -139,10 +150,24 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	}
 
 	// Write the PDF to the output stream
-	_, err = io.Copy(pdf, pdfStream)
+	out := pdf
+	var stamper *creatorStamper
+	if r.creatorPrefix != "" {
+		stamper = newCreatorStamper(pdf, r.creatorPrefix)
+		out = stamper
+	}
+	_, err = io.Copy(out, pdfStream)
 	pdfStream.Close()
 	if err != nil {
 		return fmt.Errorf("failed to write PDF to output stream: %w", err)
+	}
+	if stamper != nil {
+		err = stamper.Close()
+		if errors.Is(err, errUnstamped) {
+			r.logger.WarnContext(ctx, "pdf passed through without creator prefix", "error", err)
+		} else if err != nil {
+			return fmt.Errorf("failed to write PDF to output stream: %w", err)
+		}
 	}
 
 	r.logger.LogAttrs(ctx, slog.LevelDebug, "pdf rendered",

@@ -41,7 +41,10 @@ FROM vendor AS builder
 # Build all binaries and make them available in the /build directory. The final
 # image layer will copy them from there.
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /build/httpdf-server ./cmd/server
+
+# The version, e.g. the git tag, is stamped into the binary without a leading v
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION#v}" -o /build/httpdf-server ./cmd/server
 
 # +-----------------------------------------------------------------------------
 # | Production Image (doesn't require the source code or golang)

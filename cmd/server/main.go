@@ -31,6 +31,9 @@ const (
 	shutdownTimeout = 25 * time.Second
 )
 
+// version is set at build time: go build -ldflags "-X main.version=1.2.3"
+var version = "dev"
+
 func main() {
 	logFormat, errLogFormat := envLogFormat("HTTPDF_LOG_FORMAT")
 	logLevel, errLogLevel := envLogLevel("HTTPDF_LOG_LEVEL")
@@ -44,7 +47,10 @@ func main() {
 	}
 
 	loader := template.NewFSLoader(subdirfs.New(templatesDir))
-	pdfRenderer := pdf.NewRodRenderer(chromiumPath, pdf.WithLogger(logger))
+	pdfRenderer := pdf.NewRodRenderer(chromiumPath,
+		pdf.WithLogger(logger),
+		pdf.WithCreatorPrefix("httpdf/"+version),
+	)
 	app := httpdf.New(pdfRenderer, httpdf.WithLogger(logger))
 
 	server := &http.Server{
@@ -59,6 +65,7 @@ func main() {
 	}
 
 	logger.Info("server starting",
+		"version", version,
 		"address", listenOn,
 		"log_format", logFormat,
 		"log_level", logging.LevelName(logLevel),
