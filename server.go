@@ -63,8 +63,13 @@ func (s *server) render(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	if err := s.httpdf.Generate(r.Context(), t, extractLocale(r), values, w); err != nil {
+	err = s.httpdf.Generate(r.Context(), t, extractLocale(r), values, w)
+	if errors.Is(err, ErrInvalidValues) {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	} else if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 

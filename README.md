@@ -28,6 +28,8 @@ The web service can be run as a simple go binary or as a [docker image](https://
 #### `POST /templates/{template}/render`
 Render the template using the JSON-encoded data provided in the request body. Successful response is of `Content-Type: application/pdf`. Templates are loaded on first use and cached in memory. In order to reload a template, the server must be restarted.
 
+Error responses: `400` if the request body is not valid JSON, `404` if the template does not exist, `422` if the data does not match the template's schema, `500` for any other failure.
+
 #### `GET /templates/{template}/preview`
 Render an HTML preview of the template using data from the template's `example.json` file. Useful for template development. The preview endpoint reads the template from disk on each request, so you can test changes without restarting the server.
 
