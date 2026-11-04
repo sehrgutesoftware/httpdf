@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/sehrgutesoftware/httpdf"
 	"github.com/sehrgutesoftware/httpdf/internal/logging"
@@ -20,6 +25,10 @@ const (
 	listenOn     = ":8080"
 	chromiumPath = "/usr/bin/chromium"
 	templatesDir = "templates"
+
+	// shutdownTimeout is how long in-flight requests may take to complete after
+	// a shutdown signal.
+	shutdownTimeout = 25 * time.Second
 )
 
 func main() {
@@ -39,9 +48,14 @@ func main() {
 	app := httpdf.New(pdfRenderer, httpdf.WithLogger(logger))
 
 	server := &http.Server{
-		Addr:     listenOn,
 		Handler:  httpdf.NewServer(app, loader, httpdf.WithLogger(logger)),
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
+	}
+
+	listener, err := net.Listen("tcp", listenOn)
+	if err != nil {
+		logger.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 
 	logger.Info("server starting",
@@ -52,9 +66,49 @@ func main() {
 		"templates", templatesDir,
 	)
 
-	err := server.ListenAndServe()
-	logger.Error("server failed", "error", err)
-	os.Exit(1)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	// Restore the default signal handling after the first signal, so that a
+	// second one terminates the process immediately.
+	context.AfterFunc(ctx, stop)
+
+	if err := serve(ctx, server, listener, logger, shutdownTimeout); err != nil {
+		logger.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("server stopped")
+}
+
+// serve runs the server until ctx is canceled, then shuts it down gracefully.
+//
+// On ctx cancel, it stops accepting connections and waits up to timeout for
+// in-flight requests to complete. Incomplete requests after that are aborted.
+func serve(ctx context.Context, server *http.Server, listener net.Listener, logger *slog.Logger, timeout time.Duration) error {
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+	}
+
+	logger.Info("server shutting down",
+		"reason", context.Cause(ctx).Error(),
+		"timeout_ms", logging.Millis(timeout),
+	)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		_ = server.Close()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("in-flight requests did not complete within %s and were aborted", timeout)
+		}
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	return nil
 }
 
 // newLogger creates a logger writing in the given format ("json" or "text")
