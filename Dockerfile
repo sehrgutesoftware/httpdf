@@ -22,8 +22,10 @@ RUN mkdir /build
 ENTRYPOINT [ "CompileDaemon" ]
 CMD ["-build", "go build -o /build/server ./cmd/server", "-command", "/build/server", "-log-prefix", "false"]
 
-# Install runtime dependencies
-RUN apk add --no-cache chromium
+# Install runtime dependencies (same as the production image below)
+RUN apk add --no-cache chromium-headless-shell \
+ && apk info -qL mesa mesa-dri-gallium $(apk info -q | grep -E '^llvm[0-9]+-libs$') \
+    | grep . | sed 's|^|/|' | xargs rm -f
 
 # Install CompileDaemon, which will watch for changes in the source code and
 # recompile the binaries on the fly.
@@ -39,15 +41,19 @@ FROM vendor AS builder
 # Build all binaries and make them available in the /build directory. The final
 # image layer will copy them from there.
 COPY . .
-RUN go build -o /build/httpdf-server ./cmd/server
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /build/httpdf-server ./cmd/server
 
 # +-----------------------------------------------------------------------------
 # | Production Image (doesn't require the source code or golang)
 # +-----------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION}
 
-# Install necessary packages, including Chromium
-RUN apk add --no-cache chromium
+# Install Chromium's headless shell. GPU rendering is disabled (see
+# internal/pdf/renderer.go), so Mesa's gallium driver and LLVM are never loaded
+# and can be removed (~200 MB).
+RUN apk add --no-cache chromium-headless-shell \
+ && apk info -qL mesa mesa-dri-gallium $(apk info -q | grep -E '^llvm[0-9]+-libs$') \
+    | grep . | sed 's|^|/|' | xargs rm -f
 
 # Create an appuser
 RUN adduser -D appuser

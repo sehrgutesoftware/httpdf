@@ -23,7 +23,7 @@ import (
 
 const (
 	listenOn     = ":8080"
-	chromiumPath = "/usr/bin/chromium"
+	chromiumPath = "/usr/bin/chromium-headless-shell"
 	templatesDir = "templates"
 
 	// shutdownTimeout is how long in-flight requests may take to complete after
