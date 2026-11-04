@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -33,13 +32,32 @@ type Renderer interface {
 
 // rodRenderer is a Renderer implementation that uses rod to render PDFs
 type rodRenderer struct {
-	chromium string
+	chromium   string
+	browserLog io.Writer
 }
 
 // NewRodRenderer creates a new rodRenderer
-func NewRodRenderer(chromium string) Renderer {
-	return &rodRenderer{
-		chromium: chromium,
+func NewRodRenderer(chromium string, opts ...RodRendererOption) Renderer {
+	r := &rodRenderer{
+		chromium:   chromium,
+		browserLog: io.Discard,
+	}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	return r
+}
+
+// RodRendererOption is a function that configures the rodRenderer
+type RodRendererOption func(*rodRenderer)
+
+// WithBrowserLog sets a writer that receives the browser's stdout and stderr.
+// By default, the browser's output is discarded.
+func WithBrowserLog(w io.Writer) RodRendererOption {
+	return func(r *rodRenderer) {
+		r.browserLog = w
 	}
 }
 
@@ -49,7 +67,7 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	l, err := launcher.New().
 		Context(ctx).
 		Bin(r.chromium).
-		Logger(os.Stderr).
+		Logger(r.browserLog).
 		Headless(true).
 		Set("disable-gpu").
 		Set("disable-extensions").

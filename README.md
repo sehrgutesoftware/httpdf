@@ -17,6 +17,12 @@ Templates and schemas are plain text files and therefore easily manageable. The 
 
 The web service can be run as a simple go binary or as a [docker image](https://ghcr.io/sehrgutesoftware/httpdf).
 
+### Configuration
+
+| Environment Variable | Default | Description |
+| -------------------- | ------- | ----------- |
+| `HTTPDF_BROWSER_LOG` | `false` | Forward Chromium's stdout/stderr to the server's stderr. Useful for debugging the browser. |
+
 ### API
 
 #### `POST /templates/{template}/render`
