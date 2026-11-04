@@ -22,8 +22,7 @@ The web service can be run as a simple go binary or as a [docker image](https://
 | Environment Variable | Default | Description |
 | -------------------- | ------- | ----------- |
 | `HTTPDF_LOG_FORMAT`  | `json`  | Log format written to stdout: `json` or `text`. |
-| `HTTPDF_LOG_LEVEL`   | `info`  | Minimum log level: `debug`, `info`, `warn` or `error`. |
-| `HTTPDF_BROWSER_LOG` | `false` | Forward Chromium's stdout/stderr to the server's stderr. Useful for debugging the browser. |
+| `HTTPDF_LOG_LEVEL`   | `info`  | Minimum log level: `trace`, `debug`, `info`, `warn` or `error`. `trace` includes Chromium's output, which is useful for debugging the browser. |
 
 ### API
 

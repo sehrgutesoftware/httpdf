@@ -1,6 +1,10 @@
 package httpdf
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"github.com/sehrgutesoftware/httpdf/internal/logging"
+)
 
 // Option configures the httpdf service and server
 type Option func(*options)
@@ -19,7 +23,7 @@ func newOptions(opts []Option) options {
 	}
 
 	// Logs emitted while handling a request carry its request and trace IDs
-	o.logger = slog.New(contextHandler{o.logger.Handler()})
+	o.logger = slog.New(logging.NewContextHandler(o.logger.Handler()))
 
 	return o
 }

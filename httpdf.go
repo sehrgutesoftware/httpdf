@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sehrgutesoftware/httpdf/internal/logging"
 	"github.com/sehrgutesoftware/httpdf/internal/pdf"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 )
@@ -88,21 +89,22 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 	}
 
 	server := &http.Server{
-		Handler: handler,
+		Handler:  handler,
+		ErrorLog: slog.NewLogLogger(h.logger.Handler(), slog.LevelError),
 	}
 
 	// The temporary server can be stopped by closing the context
 	go func() {
 		<-ctx.Done()
 		if err := server.Shutdown(context.Background()); err != nil {
-			h.logger.Warn("temporary server shutdown failed", "error", err)
+			h.logger.WarnContext(ctx, "temporary server shutdown failed", "error", err)
 		}
 	}()
 
 	go func() {
 		defer listener.Close()
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			panic(err)
+			h.logger.ErrorContext(ctx, "temporary server failed", "error", err)
 		}
 	}()
 
@@ -144,7 +146,7 @@ func (h *httpdf) serveAssets(ctx context.Context, assets fs.FS) http.Handler {
 			slog.String("component", "assets"),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", rec.statusCode()),
-			slog.Float64("duration_ms", millisSince(start)),
+			slog.Float64("duration_ms", logging.MillisSince(start)),
 			slog.Int64("bytes", rec.bytes),
 		)
 	})

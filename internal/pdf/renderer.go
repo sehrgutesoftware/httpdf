@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/sehrgutesoftware/httpdf/internal/logging"
 )
 
 // RenderOpts contains options for rendering a PDF
@@ -32,20 +34,22 @@ type Renderer interface {
 
 // rodRenderer is a Renderer implementation that uses rod to render PDFs
 type rodRenderer struct {
-	chromium   string
-	browserLog io.Writer
+	chromium string
+	logger   *slog.Logger
 }
 
 // NewRodRenderer creates a new rodRenderer
 func NewRodRenderer(chromium string, opts ...RodRendererOption) Renderer {
 	r := &rodRenderer{
-		chromium:   chromium,
-		browserLog: io.Discard,
+		chromium: chromium,
+		logger:   slog.Default(),
 	}
 
 	for _, opt := range opts {
 		opt(r)
 	}
+
+	r.logger = slog.New(logging.NewContextHandler(r.logger.Handler()))
 
 	return r
 }
@@ -53,21 +57,30 @@ func NewRodRenderer(chromium string, opts ...RodRendererOption) Renderer {
 // RodRendererOption is a function that configures the rodRenderer
 type RodRendererOption func(*rodRenderer)
 
-// WithBrowserLog sets a writer that receives the browser's stdout and stderr.
-// By default, the browser's output is discarded.
-func WithBrowserLog(w io.Writer) RodRendererOption {
+// WithLogger sets the logger. Defaults to slog.Default(). The browser's
+// stdout and stderr are logged at logging.LevelTrace.
+func WithLogger(logger *slog.Logger) RodRendererOption {
 	return func(r *rodRenderer) {
-		r.browserLog = w
+		r.logger = logger
 	}
 }
 
 // Render renders a PDF from HTML content
 func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opts RenderOpts) error {
+	start := time.Now()
+
+	browserLog := io.Discard
+	if r.logger.Enabled(ctx, logging.LevelTrace) {
+		w := logging.NewLineWriter(ctx, r.logger, logging.LevelTrace, slog.String("component", "chromium"))
+		defer w.Close()
+		browserLog = w
+	}
+
 	// Launch a new browser with default options
 	l, err := launcher.New().
 		Context(ctx).
 		Bin(r.chromium).
-		Logger(r.browserLog).
+		Logger(browserLog).
 		Headless(true).
 		Set("disable-gpu").
 		Set("disable-extensions").
@@ -79,6 +92,7 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	if err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
 	}
+	launched := time.Now()
 
 	// Connect to the browser
 	browser := rod.New().Context(ctx).ControlURL(l)
@@ -99,6 +113,7 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	if err != nil {
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
+	loaded := time.Now()
 
 	// Save the page as a PDF
 	width := dumbify(opts.Width)
@@ -127,6 +142,12 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	if err != nil {
 		return fmt.Errorf("failed to write PDF to output stream: %w", err)
 	}
+
+	r.logger.LogAttrs(ctx, slog.LevelDebug, "pdf rendered",
+		slog.Float64("launch_ms", logging.Millis(launched.Sub(start))),
+		slog.Float64("load_ms", logging.Millis(loaded.Sub(launched))),
+		slog.Float64("pdf_ms", logging.MillisSince(loaded)),
+	)
 
 	return nil
 }

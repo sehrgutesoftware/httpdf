@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,19 @@ var assetModTime = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 // testAssets is an assets filesystem with a single stylesheet
 var testAssets = fstest.MapFS{
 	"style.css": {Data: []byte("body {}"), ModTime: assetModTime},
+}
+
+// panickingHTTPDF panics while generating, optionally after starting the
+// response
+type panickingHTTPDF struct {
+	afterWrite bool
+}
+
+func (h *panickingHTTPDF) Generate(ctx context.Context, t *template.Template, locale string, v map[string]any, w io.Writer) error {
+	if h.afterWrite {
+		_, _ = w.Write([]byte("%PDF-1.4"))
+	}
+	panic("kaboom")
 }
 
 func TestServer_RequestLog(t *testing.T) {
@@ -127,6 +141,32 @@ func TestServer_RequestLog(t *testing.T) {
 		assert.Equal(t, "ERROR", record["level"])
 		assert.Equal(t, float64(500), record["status"])
 		assert.Equal(t, "browser exploded", record["error"])
+	})
+
+	t.Run("it_recovers_from_panics_and_logs_them_at_error", func(t *testing.T) {
+		rec, buf := serve(&panickingHTTPDF{}, renderRequest("known", `{}`))
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.NotEqual(t, "application/pdf", rec.Header().Get("Content-Type"))
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "ERROR", record["level"])
+		assert.Equal(t, float64(500), record["status"])
+		assert.Equal(t, "panic: kaboom", record["error"])
+		assert.Contains(t, record["stack"], "panickingHTTPDF")
+	})
+
+	t.Run("it_aborts_the_response_on_panics_after_it_was_started", func(t *testing.T) {
+		var buf bytes.Buffer
+		server := httpdf.NewServer(&panickingHTTPDF{afterWrite: true}, loader, httpdf.WithLogger(newTestLogger(&buf)))
+
+		assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+			server.ServeHTTP(httptest.NewRecorder(), renderRequest("known", `{}`))
+		})
+
+		record := logRecord(t, &buf, "request")
+		assert.Equal(t, "ERROR", record["level"])
+		assert.Equal(t, float64(200), record["status"])
+		assert.Equal(t, "panic: kaboom", record["error"])
 	})
 
 	t.Run("it_logs_canceled_requests_at_info_with_status_499", func(t *testing.T) {
@@ -301,6 +341,47 @@ func TestServer_RequestLogCorrelation(t *testing.T) {
 		inner := logRecord(t, &buf, "temporary server started")
 		assert.Equal(t, request["request_id"], inner["request_id"])
 		assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", inner["trace_id"])
+	})
+}
+
+func TestServer_TemplateLoadedLog(t *testing.T) {
+	render := func(server http.Handler, tmpl string) {
+		req := httptest.NewRequest(http.MethodPost, "/templates/"+tmpl+"/render", strings.NewReader(`{}`))
+		server.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	t.Run("it_logs_when_a_template_is_loaded_into_the_cache", func(t *testing.T) {
+		var buf bytes.Buffer
+		loader := &stubLoader{templates: map[string]*template.Template{"known": {}}}
+		server := httpdf.NewServer(&stubHTTPDF{}, loader, httpdf.WithLogger(newTestLogger(&buf)))
+
+		render(server, "known")
+		render(server, "known")
+
+		record := logRecord(t, &buf, "template loaded")
+		assert.Equal(t, "INFO", record["level"])
+		assert.Equal(t, "known", record["template"])
+		assert.Contains(t, record, "duration_ms")
+		var requests []map[string]any
+		for _, r := range logRecords(t, &buf) {
+			if r["msg"] == "request" {
+				requests = append(requests, r)
+			}
+		}
+		require.Len(t, requests, 2)
+		assert.Equal(t, requests[0]["request_id"], record["request_id"])
+	})
+
+	t.Run("it_does_not_log_failed_loads", func(t *testing.T) {
+		var buf bytes.Buffer
+		loader := &stubLoader{templates: map[string]*template.Template{}}
+		server := httpdf.NewServer(&stubHTTPDF{}, loader, httpdf.WithLogger(newTestLogger(&buf)))
+
+		render(server, "unknown")
+
+		for _, record := range logRecords(t, &buf) {
+			assert.NotEqual(t, "template loaded", record["msg"])
+		}
 	})
 }
 

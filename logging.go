@@ -4,12 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sehrgutesoftware/httpdf/internal/logging"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -27,11 +31,8 @@ var (
 	traceparentPattern = regexp.MustCompile(`^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}(-.*)?$`)
 )
 
-// requestInfo holds per-request data for logging
+// requestInfo holds per-request data for the summary log line
 type requestInfo struct {
-	requestID string
-	traceID   string
-
 	mu    sync.Mutex
 	attrs []slog.Attr
 	quiet bool
@@ -65,21 +66,31 @@ func quietOnSuccess(ctx context.Context) {
 }
 
 // logRequests is a middleware that assigns a request ID to each request and
-// logs a summary line once the request is complete.
+// logs a summary line once the request is complete. It also recovers from
+// panics in the handler, so that they are logged with the request.
 func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		info := &requestInfo{
-			requestID: requestID(r.Header.Get(requestIDHeader)),
-			traceID:   traceID(r.Header.Values("traceparent")),
-		}
+		reqID := requestID(r.Header.Get(requestIDHeader))
+		info := &requestInfo{}
 		ctx := context.WithValue(r.Context(), requestInfoKey{}, info)
+		ctx = logging.ContextWithIDs(ctx, reqID, traceID(r.Header.Values("traceparent")))
 		r = r.WithContext(ctx)
-		w.Header().Set(requestIDHeader, info.requestID)
+		w.Header().Set(requestIDHeader, reqID)
 
 		rec := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(rec, r)
+		recovered, stack := serveRecovering(next, rec, r)
+		wroteHeader := rec.status != 0
+		if recovered != nil {
+			addLogAttrs(ctx,
+				slog.String("error", fmt.Sprintf("panic: %v", recovered)),
+				slog.String("stack", string(stack)),
+			)
+			if !wroteHeader {
+				http.Error(rec, "internal server error", http.StatusInternalServerError)
+			}
+		}
 
 		status := rec.statusCode()
 		canceled := errors.Is(ctx.Err(), context.Canceled)
@@ -91,7 +102,7 @@ func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", status),
-			slog.Float64("duration_ms", millisSince(start)),
+			slog.Float64("duration_ms", logging.MillisSince(start)),
 			slog.Int64("bytes", rec.bytes),
 		}
 		info.mu.Lock()
@@ -99,8 +110,34 @@ func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 		quiet := info.quiet
 		info.mu.Unlock()
 
-		logger.LogAttrs(ctx, requestLogLevel(status, canceled, quiet), "request", attrs...)
+		level := requestLogLevel(status, canceled, quiet)
+		if recovered != nil {
+			level = slog.LevelError
+		}
+		logger.LogAttrs(ctx, level, "request", attrs...)
+
+		// If the response was already started, aborting the connection is the
+		// only way to tell the client that it is incomplete.
+		if recovered != nil && wroteHeader {
+			panic(http.ErrAbortHandler)
+		}
 	})
+}
+
+// serveRecovering calls next and recovers from a panic. It returns the
+// recovered value and the stack trace, or nil if next didn't panic.
+func serveRecovering(next http.Handler, w http.ResponseWriter, r *http.Request) (recovered any, stack []byte) {
+	defer func() {
+		if recovered = recover(); recovered != nil {
+			if recovered == http.ErrAbortHandler {
+				panic(recovered)
+			}
+			stack = debug.Stack()
+		}
+	}()
+
+	next.ServeHTTP(w, r)
+	return nil, nil
 }
 
 // requestLogLevel determines the level of a request's summary line. Requests
@@ -118,11 +155,6 @@ func requestLogLevel(status int, canceled bool, quiet bool) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// millisSince returns the time elapsed since start in milliseconds
-func millisSince(start time.Time) float64 {
-	return float64(time.Since(start).Microseconds()) / 1000
 }
 
 // requestID returns the client-provided request ID if it is acceptable, or
@@ -189,28 +221,4 @@ func (r *statusRecorder) statusCode() int {
 		return http.StatusOK
 	}
 	return r.status
-}
-
-// contextHandler adds the request and trace IDs from the context to each log
-// record, so that all logs emitted while handling a request can be correlated.
-type contextHandler struct {
-	slog.Handler
-}
-
-func (h contextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if info := requestInfoFrom(ctx); info != nil {
-		r.AddAttrs(slog.String("request_id", info.requestID))
-		if info.traceID != "" {
-			r.AddAttrs(slog.String("trace_id", info.traceID))
-		}
-	}
-	return h.Handler.Handle(ctx, r)
-}
-
-func (h contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return contextHandler{h.Handler.WithAttrs(attrs)}
-}
-
-func (h contextHandler) WithGroup(name string) slog.Handler {
-	return contextHandler{h.Handler.WithGroup(name)}
 }

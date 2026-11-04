@@ -1,14 +1,17 @@
 package httpdf
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/handlers"
+	"github.com/sehrgutesoftware/httpdf/internal/logging"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 )
 
@@ -16,6 +19,7 @@ type server struct {
 	*http.ServeMux
 	httpdf  HTTPDF
 	loader  template.Loader
+	logger  *slog.Logger
 	cache   map[string]*template.Template
 	cacheMu sync.Mutex
 }
@@ -26,6 +30,7 @@ func NewServer(httpdf HTTPDF, loader template.Loader, opts ...Option) http.Handl
 		ServeMux: http.NewServeMux(),
 		httpdf:   httpdf,
 		loader:   loader,
+		logger:   o.logger,
 		cache:    make(map[string]*template.Template),
 	}
 
@@ -66,7 +71,7 @@ func (s *server) render(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// For the render operation, the cached template is used
-	t, err := s.cachedTemplate(r.PathValue("template"))
+	t, err := s.cachedTemplate(r.Context(), r.PathValue("template"))
 	if errors.Is(err, template.ErrTemplateNotFound) {
 		httpError(w, r, "template not found", http.StatusNotFound, err)
 		return
@@ -120,7 +125,7 @@ func (s *server) assets(w http.ResponseWriter, r *http.Request) {
 
 	// Assets are served from the cached template because they are read from the
 	// filesystem on each request.
-	t, err := s.cachedTemplate(r.PathValue("template"))
+	t, err := s.cachedTemplate(r.Context(), r.PathValue("template"))
 	if errors.Is(err, template.ErrTemplateNotFound) {
 		httpError(w, r, "template not found", http.StatusNotFound, err)
 		return
@@ -137,7 +142,7 @@ func (s *server) assets(w http.ResponseWriter, r *http.Request) {
 	http.StripPrefix(prefix, http.FileServer(http.FS(t.Assets))).ServeHTTP(w, r)
 }
 
-func (s *server) cachedTemplate(name string) (*template.Template, error) {
+func (s *server) cachedTemplate(ctx context.Context, name string) (*template.Template, error) {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 
@@ -145,12 +150,17 @@ func (s *server) cachedTemplate(name string) (*template.Template, error) {
 		return t, nil
 	}
 
+	start := time.Now()
 	t, err := s.loader.Load(name)
 	if err != nil {
 		return nil, err
 	}
 
 	s.cache[name] = t
+	s.logger.InfoContext(ctx, "template loaded",
+		"template", name,
+		"duration_ms", logging.MillisSince(start),
+	)
 	return t, nil
 }
 

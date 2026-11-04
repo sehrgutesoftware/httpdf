@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
 
+	"github.com/sehrgutesoftware/httpdf/internal/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +48,7 @@ func TestEnvLogLevel(t *testing.T) {
 		wantErr bool
 	}{
 		"defaults_to_info": {value: "", want: slog.LevelInfo},
+		"accepts_trace":    {value: "trace", want: logging.LevelTrace},
 		"accepts_debug":    {value: "debug", want: slog.LevelDebug},
 		"accepts_warn":     {value: "warn", want: slog.LevelWarn},
 		"accepts_error":    {value: "ERROR", want: slog.LevelError},
@@ -61,35 +64,6 @@ func TestEnvLogLevel(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 			if tc.wantErr {
 				assert.ErrorContains(t, err, "TEST_LOG_LEVEL")
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestEnvBool(t *testing.T) {
-	cases := map[string]struct {
-		value   string
-		want    bool
-		wantErr bool
-	}{
-		"defaults_to_false": {value: "", want: false},
-		"accepts_true":      {value: "true", want: true},
-		"accepts_1":         {value: "1", want: true},
-		"accepts_false":     {value: "false", want: false},
-		"rejects_garbage":   {value: "yes please", want: false, wantErr: true},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("TEST_BOOL", tc.value)
-
-			got, err := envBool("TEST_BOOL")
-
-			assert.Equal(t, tc.want, got)
-			if tc.wantErr {
-				assert.ErrorContains(t, err, "TEST_BOOL")
 			} else {
 				assert.NoError(t, err)
 			}
@@ -123,5 +97,21 @@ func TestNewLogger(t *testing.T) {
 
 		assert.NotContains(t, buf.String(), "dropped")
 		assert.Contains(t, buf.String(), "kept")
+	})
+
+	t.Run("it_writes_trace_records_as_TRACE", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := newLogger(&buf, "text", logging.LevelTrace)
+		logger.Log(context.Background(), logging.LevelTrace, "hello")
+
+		assert.Contains(t, buf.String(), "level=TRACE msg=hello")
+	})
+
+	t.Run("it_drops_trace_records_at_debug", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := newLogger(&buf, "text", slog.LevelDebug)
+		logger.Log(context.Background(), logging.LevelTrace, "hello")
+
+		assert.Empty(t, buf.String())
 	})
 }
