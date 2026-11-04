@@ -1,9 +1,10 @@
 module github.com/sehrgutesoftware/httpdf
 
-go 1.24.3
+go 1.27.3
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/boombuler/barcode v1.1.0
 	github.com/go-rod/rod v0.116.2
 	github.com/gorilla/handlers v1.5.2
 	github.com/kaptinlin/go-i18n v0.1.4
@@ -16,7 +17,6 @@ require (
 	dario.cat/mergo v1.0.1 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
-	github.com/boombuler/barcode v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect

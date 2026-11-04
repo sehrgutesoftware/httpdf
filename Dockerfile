@@ -1,5 +1,5 @@
-ARG ALPINE_VERSION=3.22
-ARG GOLANG_VERSION=1.24
+ARG ALPINE_VERSION=3.24
+ARG GOLANG_VERSION=1.27.3
 
 # +-----------------------------------------------------------------------------
 # | Vendor Dependencies
