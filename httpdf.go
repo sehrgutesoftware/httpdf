@@ -1,10 +1,12 @@
 package httpdf
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -44,9 +46,16 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
 	}
 
+	// The template is rendered before the browser is involved, because the
+	// browser would turn an error response into a PDF of the error message.
+	var html bytes.Buffer
+	if err := t.Render(v, "/assets", locale, &html); err != nil {
+		return fmt.Errorf("render template: %w", err)
+	}
+
 	srvCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	serverAddr, err := h.temporaryServer(srvCtx, h.serve(t, locale, v))
+	serverAddr, err := h.temporaryServer(srvCtx, h.serve(t.Assets, html.Bytes()))
 	if err != nil {
 		return fmt.Errorf("generate: %w", err)
 	}
@@ -94,16 +103,12 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 	return fmt.Sprintf("http://%s", listener.Addr().String()), nil
 }
 
-func (h *httpdf) serve(t *template.Template, locale string, v map[string]any) http.Handler {
+func (h *httpdf) serve(assets fs.FS, html []byte) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(t.Assets))))
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		err := t.Render(v, "/assets", locale, w)
-		if err != nil {
-			http.Error(w, "render template", http.StatusInternalServerError)
-			return
-		}
+		_, _ = w.Write(html)
 	})
 
 	return mux
