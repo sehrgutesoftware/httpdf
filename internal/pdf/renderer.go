@@ -82,6 +82,8 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 		Bin(r.chromium).
 		Logger(browserLog).
 		Headless(true).
+		// The Dockerfile removes Mesa and LLVM from the image, which is only
+		// safe because GPU rendering is disabled here.
 		Set("disable-gpu").
 		Set("disable-extensions").
 		Set("disable-dev-shm-usage").
