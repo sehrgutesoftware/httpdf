@@ -105,7 +105,9 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 
 func (h *httpdf) serve(assets fs.FS, html []byte) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
+	if assets != nil {
+		mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
+	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write(html)
