@@ -5,6 +5,9 @@ services:
         build:
             context: .
             target: hot-reload
+        environment:
+            HTTPDF_LOG_FORMAT: text
+            HTTPDF_LOG_LEVEL: debug
         volumes:
             - .:/app:rw
         ports:

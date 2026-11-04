@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 
@@ -29,14 +29,18 @@ type HTTPDF interface {
 // httpdf is the core implementation of the httpdf service.
 type httpdf struct {
 	pdfRenderer pdf.Renderer
+	logger      *slog.Logger
 }
 
 // New creates a new httpdf service.
 func New(
 	pdfRenderer pdf.Renderer,
+	opts ...Option,
 ) HTTPDF {
+	o := newOptions(opts)
 	return &httpdf{
 		pdfRenderer: pdfRenderer,
+		logger:      o.logger,
 	}
 }
 
@@ -60,7 +64,7 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 		return fmt.Errorf("generate: %w", err)
 	}
 
-	log.Printf("Starting temporary server at %s", serverAddr)
+	h.logger.DebugContext(ctx, "temporary server started", "address", serverAddr)
 
 	if err := h.pdfRenderer.Render(ctx, serverAddr, w, pdf.RenderOpts{
 		Width:                   t.Config.Page.Width,
@@ -90,7 +94,7 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 	go func() {
 		<-ctx.Done()
 		if err := server.Shutdown(context.Background()); err != nil {
-			fmt.Printf("shut down temporary server: %v\n", err)
+			h.logger.Warn("temporary server shutdown failed", "error", err)
 		}
 	}()
 

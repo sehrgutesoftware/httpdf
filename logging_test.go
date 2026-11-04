@@ -1,0 +1,243 @@
+package httpdf_test
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/sehrgutesoftware/httpdf"
+	"github.com/sehrgutesoftware/httpdf/internal/template"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newTestLogger(buf *bytes.Buffer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+// logRecords parses the JSON log lines written to buf
+func logRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var records []map[string]any
+	scanner := bufio.NewScanner(bytes.NewReader(buf.Bytes()))
+	for scanner.Scan() {
+		var record map[string]any
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &record))
+		records = append(records, record)
+	}
+	return records
+}
+
+// logRecord returns the single log record with the given message
+func logRecord(t *testing.T, buf *bytes.Buffer, msg string) map[string]any {
+	t.Helper()
+	var found []map[string]any
+	for _, record := range logRecords(t, buf) {
+		if record["msg"] == msg {
+			found = append(found, record)
+		}
+	}
+	require.Len(t, found, 1, "expected exactly one %q log record in:\n%s", msg, buf.String())
+	return found[0]
+}
+
+func TestServer_RequestLog(t *testing.T) {
+	loader := &stubLoader{templates: map[string]*template.Template{
+		"known": {},
+	}}
+
+	serve := func(generator httpdf.HTTPDF, req *http.Request) (*httptest.ResponseRecorder, *bytes.Buffer) {
+		var buf bytes.Buffer
+		server := httpdf.NewServer(generator, loader, httpdf.WithLogger(newTestLogger(&buf)))
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		return rec, &buf
+	}
+
+	renderRequest := func(tmpl string, body string) *http.Request {
+		return httptest.NewRequest(http.MethodPost, "/templates/"+tmpl+"/render?lang=de", strings.NewReader(body))
+	}
+
+	t.Run("it_logs_successful_requests_at_info", func(t *testing.T) {
+		rec, buf := serve(&stubHTTPDF{}, renderRequest("known", `{}`))
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "INFO", record["level"])
+		assert.Equal(t, "POST", record["method"])
+		assert.Equal(t, "/templates/known/render", record["path"])
+		assert.Equal(t, float64(200), record["status"])
+		assert.Equal(t, float64(len("%PDF-1.4")), record["bytes"])
+		assert.Contains(t, record, "duration_ms")
+		assert.Equal(t, "known", record["template"])
+		assert.Equal(t, "de", record["locale"])
+		assert.NotContains(t, record, "error")
+		assert.NotContains(t, record, "trace_id")
+		assert.NotEmpty(t, record["request_id"])
+		assert.Equal(t, rec.Header().Get("X-Request-ID"), record["request_id"])
+	})
+
+	t.Run("it_logs_client_errors_at_warn", func(t *testing.T) {
+		invalidValues := fmt.Errorf("%w: name is required", httpdf.ErrInvalidValues)
+		cases := map[string]struct {
+			generator httpdf.HTTPDF
+			req       *http.Request
+			status    float64
+			err       string
+		}{
+			"invalid_json":     {&stubHTTPDF{}, renderRequest("known", `{not json`), 400, "invalid character"},
+			"unknown_template": {&stubHTTPDF{}, renderRequest("unknown", `{}`), 404, "template not found"},
+			"invalid_values":   {&stubHTTPDF{err: invalidValues}, renderRequest("known", `{}`), 422, "name is required"},
+		}
+
+		for name, tc := range cases {
+			t.Run(name, func(t *testing.T) {
+				_, buf := serve(tc.generator, tc.req)
+
+				record := logRecord(t, buf, "request")
+				assert.Equal(t, "WARN", record["level"])
+				assert.Equal(t, tc.status, record["status"])
+				assert.Contains(t, record["error"], tc.err)
+			})
+		}
+	})
+
+	t.Run("it_logs_server_errors_at_error", func(t *testing.T) {
+		_, buf := serve(&stubHTTPDF{err: errors.New("browser exploded")}, renderRequest("known", `{}`))
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "ERROR", record["level"])
+		assert.Equal(t, float64(500), record["status"])
+		assert.Equal(t, "browser exploded", record["error"])
+	})
+
+	t.Run("it_logs_canceled_requests_at_info_with_status_499", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := renderRequest("known", `{}`).WithContext(ctx)
+
+		_, buf := serve(&stubHTTPDF{err: context.Canceled}, req)
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "INFO", record["level"])
+		assert.Equal(t, float64(499), record["status"])
+	})
+
+	t.Run("it_logs_health_checks_at_debug", func(t *testing.T) {
+		_, buf := serve(&stubHTTPDF{}, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "DEBUG", record["level"])
+		assert.Equal(t, float64(200), record["status"])
+	})
+
+	t.Run("it_keeps_a_valid_client_request_id", func(t *testing.T) {
+		req := renderRequest("known", `{}`)
+		req.Header.Set("X-Request-ID", "abc-123")
+
+		rec, buf := serve(&stubHTTPDF{}, req)
+
+		assert.Equal(t, "abc-123", rec.Header().Get("X-Request-ID"))
+		assert.Equal(t, "abc-123", logRecord(t, buf, "request")["request_id"])
+	})
+
+	t.Run("it_replaces_invalid_client_request_ids", func(t *testing.T) {
+		cases := map[string]string{
+			"too_long":           strings.Repeat("a", 129),
+			"contains_space":     "abc 123",
+			"contains_non_ascii": "abc-ü",
+		}
+
+		for name, id := range cases {
+			t.Run(name, func(t *testing.T) {
+				req := renderRequest("known", `{}`)
+				req.Header.Set("X-Request-ID", id)
+
+				rec, buf := serve(&stubHTTPDF{}, req)
+
+				got := rec.Header().Get("X-Request-ID")
+				assert.NotEmpty(t, got)
+				assert.NotEqual(t, id, got)
+				assert.Equal(t, got, logRecord(t, buf, "request")["request_id"])
+			})
+		}
+	})
+
+	t.Run("it_logs_the_trace_id_from_traceparent", func(t *testing.T) {
+		const trace = "4bf92f3577b34da6a3ce929d0e0e4736"
+		cases := map[string]struct {
+			headers []string
+			want    string
+		}{
+			"valid":                  {[]string{"00-" + trace + "-00f067aa0ba902b7-01"}, trace},
+			"future_version_suffix":  {[]string{"01-" + trace + "-00f067aa0ba902b7-01-extra"}, trace},
+			"surrounding_whitespace": {[]string{" 00-" + trace + "-00f067aa0ba902b7-01 "}, trace},
+			"version_00_with_suffix": {[]string{"00-" + trace + "-00f067aa0ba902b7-01-extra"}, ""},
+			"invalid_version_ff":     {[]string{"ff-" + trace + "-00f067aa0ba902b7-01"}, ""},
+			"all_zero_trace_id":      {[]string{"00-" + strings.Repeat("0", 32) + "-00f067aa0ba902b7-01"}, ""},
+			"all_zero_parent_id":     {[]string{"00-" + trace + "-" + strings.Repeat("0", 16) + "-01"}, ""},
+			"uppercase_hex":          {[]string{"00-" + strings.ToUpper(trace) + "-00f067aa0ba902b7-01"}, ""},
+			"malformed":              {[]string{"not-a-traceparent"}, ""},
+			"multiple_headers":       {[]string{"00-" + trace + "-00f067aa0ba902b7-01", "00-" + trace + "-00f067aa0ba902b7-01"}, ""},
+		}
+
+		for name, tc := range cases {
+			t.Run(name, func(t *testing.T) {
+				req := renderRequest("known", `{}`)
+				for _, h := range tc.headers {
+					req.Header.Add("traceparent", h)
+				}
+
+				_, buf := serve(&stubHTTPDF{}, req)
+
+				record := logRecord(t, buf, "request")
+				if tc.want == "" {
+					assert.NotContains(t, record, "trace_id")
+				} else {
+					assert.Equal(t, tc.want, record["trace_id"])
+				}
+			})
+		}
+	})
+
+	t.Run("it_allows_tracing_headers_in_cors_preflight", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodOptions, "/templates/known/render", nil)
+		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		req.Header.Set("Access-Control-Request-Headers", "content-type, x-request-id, traceparent")
+
+		rec, _ := serve(&stubHTTPDF{}, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestServer_RequestLogCorrelation(t *testing.T) {
+	t.Run("it_adds_request_and_trace_ids_to_logs_emitted_during_the_request", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := newTestLogger(&buf)
+		loader := &stubLoader{templates: map[string]*template.Template{
+			"hello": newTemplate(t, `Hello`, `{}`),
+		}}
+		app := httpdf.New(&fetchingRenderer{}, httpdf.WithLogger(logger))
+		server := httpdf.NewServer(app, loader, httpdf.WithLogger(logger))
+
+		req := httptest.NewRequest(http.MethodPost, "/templates/hello/render", strings.NewReader(`{}`))
+		req.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		request := logRecord(t, &buf, "request")
+		inner := logRecord(t, &buf, "temporary server started")
+		assert.Equal(t, request["request_id"], inner["request_id"])
+		assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", inner["trace_id"])
+	})
+}
