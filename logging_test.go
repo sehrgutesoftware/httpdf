@@ -12,8 +12,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 
 	"github.com/sehrgutesoftware/httpdf"
+	"github.com/sehrgutesoftware/httpdf/internal/pdf"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,9 +52,17 @@ func logRecord(t *testing.T, buf *bytes.Buffer, msg string) map[string]any {
 	return found[0]
 }
 
+var assetModTime = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// testAssets is an assets filesystem with a single stylesheet
+var testAssets = fstest.MapFS{
+	"style.css": {Data: []byte("body {}"), ModTime: assetModTime},
+}
+
 func TestServer_RequestLog(t *testing.T) {
 	loader := &stubLoader{templates: map[string]*template.Template{
-		"known": {},
+		"known":       {},
+		"with_assets": {Assets: testAssets},
 	}}
 
 	serve := func(generator httpdf.HTTPDF, req *http.Request) (*httptest.ResponseRecorder, *bytes.Buffer) {
@@ -136,6 +147,57 @@ func TestServer_RequestLog(t *testing.T) {
 		record := logRecord(t, buf, "request")
 		assert.Equal(t, "DEBUG", record["level"])
 		assert.Equal(t, float64(200), record["status"])
+	})
+
+	t.Run("it_logs_successful_asset_requests_at_debug", func(t *testing.T) {
+		_, buf := serve(&stubHTTPDF{}, httptest.NewRequest(http.MethodGet, "/templates/with_assets/assets/style.css", nil))
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "DEBUG", record["level"])
+		assert.Equal(t, float64(200), record["status"])
+		assert.Equal(t, "with_assets", record["template"])
+		assert.NotContains(t, record, "component")
+	})
+
+	t.Run("it_logs_not_modified_asset_requests_at_debug", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/templates/with_assets/assets/style.css", nil)
+		req.Header.Set("If-Modified-Since", assetModTime.Format(http.TimeFormat))
+
+		_, buf := serve(&stubHTTPDF{}, req)
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "DEBUG", record["level"])
+		assert.Equal(t, float64(304), record["status"])
+	})
+
+	t.Run("it_logs_canceled_asset_requests_at_debug", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		req := httptest.NewRequest(http.MethodGet, "/templates/with_assets/assets/style.css", nil).WithContext(ctx)
+
+		_, buf := serve(&stubHTTPDF{}, req)
+
+		record := logRecord(t, buf, "request")
+		assert.Equal(t, "DEBUG", record["level"])
+		assert.Equal(t, float64(499), record["status"])
+	})
+
+	t.Run("it_logs_failed_asset_requests_at_warn", func(t *testing.T) {
+		cases := map[string]string{
+			"missing_asset":       "/templates/with_assets/assets/missing.css",
+			"template_has_none":   "/templates/known/assets/style.css",
+			"template_is_unknown": "/templates/unknown/assets/style.css",
+		}
+
+		for name, path := range cases {
+			t.Run(name, func(t *testing.T) {
+				_, buf := serve(&stubHTTPDF{}, httptest.NewRequest(http.MethodGet, path, nil))
+
+				record := logRecord(t, buf, "request")
+				assert.Equal(t, "WARN", record["level"])
+				assert.Equal(t, float64(404), record["status"])
+			})
+		}
 	})
 
 	t.Run("it_keeps_a_valid_client_request_id", func(t *testing.T) {
@@ -239,5 +301,77 @@ func TestServer_RequestLogCorrelation(t *testing.T) {
 		inner := logRecord(t, &buf, "temporary server started")
 		assert.Equal(t, request["request_id"], inner["request_id"])
 		assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", inner["trace_id"])
+	})
+}
+
+func TestHTTPDF_AssetLog(t *testing.T) {
+	withAssets := newTemplate(t, `<link rel="stylesheet" href="/assets/style.css">`, `{}`)
+	withAssets.Assets = testAssets
+	loader := &stubLoader{templates: map[string]*template.Template{
+		"with_assets": withAssets,
+		"no_assets":   newTemplate(t, `<link rel="stylesheet" href="/assets/style.css">`, `{}`),
+	}}
+
+	// render renders the template with a renderer that fetches the given path
+	// from the temporary server
+	render := func(t *testing.T, renderer pdf.Renderer, tmpl string) *bytes.Buffer {
+		t.Helper()
+		var buf bytes.Buffer
+		logger := newTestLogger(&buf)
+		app := httpdf.New(renderer, httpdf.WithLogger(logger))
+		server := httpdf.NewServer(app, loader, httpdf.WithLogger(logger))
+
+		req := httptest.NewRequest(http.MethodPost, "/templates/"+tmpl+"/render", strings.NewReader(`{}`))
+		req.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		return &buf
+	}
+
+	t.Run("it_logs_successful_asset_requests_at_debug", func(t *testing.T) {
+		buf := render(t, &assetRenderer{path: "/assets/style.css"}, "with_assets")
+
+		record := logRecord(t, buf, "asset request")
+		assert.Equal(t, "DEBUG", record["level"])
+		assert.Equal(t, "assets", record["component"])
+		assert.Equal(t, "/assets/style.css", record["path"])
+		assert.Equal(t, float64(200), record["status"])
+		assert.Equal(t, float64(len("body {}")), record["bytes"])
+		assert.Contains(t, record, "duration_ms")
+		assert.Equal(t, logRecord(t, buf, "request")["request_id"], record["request_id"])
+		assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", record["trace_id"])
+	})
+
+	t.Run("it_logs_failed_asset_requests_at_warn", func(t *testing.T) {
+		cases := map[string]struct {
+			path string
+			tmpl string
+		}{
+			"missing_asset":     {"/assets/missing.css", "with_assets"},
+			"template_has_none": {"/assets/style.css", "no_assets"},
+		}
+
+		for name, tc := range cases {
+			t.Run(name, func(t *testing.T) {
+				buf := render(t, &assetRenderer{path: tc.path}, tc.tmpl)
+
+				record := logRecord(t, buf, "asset request")
+				assert.Equal(t, "WARN", record["level"])
+				assert.Equal(t, "assets", record["component"])
+				assert.Equal(t, tc.path, record["path"])
+				assert.Equal(t, float64(404), record["status"])
+				assert.Equal(t, logRecord(t, buf, "request")["request_id"], record["request_id"])
+			})
+		}
+	})
+
+	t.Run("it_does_not_log_requests_for_the_page", func(t *testing.T) {
+		buf := render(t, &fetchingRenderer{}, "with_assets")
+
+		for _, record := range logRecords(t, buf) {
+			assert.NotEqual(t, "asset request", record["msg"])
+		}
 	})
 }

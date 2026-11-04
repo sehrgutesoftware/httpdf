@@ -34,6 +34,7 @@ type requestInfo struct {
 
 	mu    sync.Mutex
 	attrs []slog.Attr
+	quiet bool
 }
 
 type requestInfoKey struct{}
@@ -48,6 +49,17 @@ func addLogAttrs(ctx context.Context, attrs ...slog.Attr) {
 	if info := requestInfoFrom(ctx); info != nil {
 		info.mu.Lock()
 		info.attrs = append(info.attrs, attrs...)
+		info.mu.Unlock()
+	}
+}
+
+// quietOnSuccess logs the request's summary line at debug level, unless the
+// request fails. Meant for frequent requests that are only interesting when
+// something goes wrong.
+func quietOnSuccess(ctx context.Context) {
+	if info := requestInfoFrom(ctx); info != nil {
+		info.mu.Lock()
+		info.quiet = true
 		info.mu.Unlock()
 	}
 }
@@ -70,38 +82,47 @@ func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		status := rec.statusCode()
-		level := requestLogLevel(r, status)
-		if errors.Is(ctx.Err(), context.Canceled) {
+		canceled := errors.Is(ctx.Err(), context.Canceled)
+		if canceled {
 			status = statusClientClosedRequest
-			level = slog.LevelInfo
 		}
 
 		attrs := []slog.Attr{
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", status),
-			slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
+			slog.Float64("duration_ms", millisSince(start)),
 			slog.Int64("bytes", rec.bytes),
 		}
 		info.mu.Lock()
 		attrs = append(attrs, info.attrs...)
+		quiet := info.quiet
 		info.mu.Unlock()
 
-		logger.LogAttrs(ctx, level, "request", attrs...)
+		logger.LogAttrs(ctx, requestLogLevel(status, canceled, quiet), "request", attrs...)
 	})
 }
 
-func requestLogLevel(r *http.Request, status int) slog.Level {
+// requestLogLevel determines the level of a request's summary line. Requests
+// canceled by the client are not considered failures.
+func requestLogLevel(status int, canceled bool, quiet bool) slog.Level {
 	switch {
+	case quiet && (canceled || status < 400):
+		return slog.LevelDebug
+	case canceled:
+		return slog.LevelInfo
 	case status >= 500:
 		return slog.LevelError
 	case status >= 400:
 		return slog.LevelWarn
-	case r.URL.Path == "/healthz":
-		return slog.LevelDebug
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// millisSince returns the time elapsed since start in milliseconds
+func millisSince(start time.Time) float64 {
+	return float64(time.Since(start).Microseconds()) / 1000
 }
 
 // requestID returns the client-provided request ID if it is acceptable, or

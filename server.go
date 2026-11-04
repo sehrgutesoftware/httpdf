@@ -45,6 +45,8 @@ func NewServer(httpdf HTTPDF, loader template.Loader, opts ...Option) http.Handl
 }
 
 func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
+	quietOnSuccess(r.Context())
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
@@ -113,6 +115,7 @@ func (s *server) preview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) assets(w http.ResponseWriter, r *http.Request) {
+	quietOnSuccess(r.Context())
 	addLogAttrs(r.Context(), slog.String("template", r.PathValue("template")))
 
 	// Assets are served from the cached template because they are read from the

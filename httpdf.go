@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/sehrgutesoftware/httpdf/internal/pdf"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
@@ -59,7 +60,7 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 
 	srvCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	serverAddr, err := h.temporaryServer(srvCtx, h.serve(t.Assets, html.Bytes()))
+	serverAddr, err := h.temporaryServer(srvCtx, h.serve(ctx, t.Assets, html.Bytes()))
 	if err != nil {
 		return fmt.Errorf("generate: %w", err)
 	}
@@ -108,15 +109,43 @@ func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (str
 	return fmt.Sprintf("http://%s", listener.Addr().String()), nil
 }
 
-func (h *httpdf) serve(assets fs.FS, html []byte) http.Handler {
+func (h *httpdf) serve(ctx context.Context, assets fs.FS, html []byte) http.Handler {
 	mux := http.NewServeMux()
-	if assets != nil {
-		mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
-	}
+	mux.Handle("GET /assets/", h.serveAssets(ctx, assets))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write(html)
 	})
 
 	return mux
+}
+
+// serveAssets serves the template's assets to the browser and logs each
+// request. Failed requests are logged as warnings, because the PDF will be
+// generated without the asset.
+func (h *httpdf) serveAssets(ctx context.Context, assets fs.FS) http.Handler {
+	files := http.NotFoundHandler()
+	if assets != nil {
+		files = http.StripPrefix("/assets/", http.FileServer(http.FS(assets)))
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w}
+		files.ServeHTTP(rec, r)
+
+		level := slog.LevelDebug
+		if rec.statusCode() >= 400 {
+			level = slog.LevelWarn
+		}
+
+		// The render's context carries the request and trace IDs
+		h.logger.LogAttrs(ctx, level, "asset request",
+			slog.String("component", "assets"),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", rec.statusCode()),
+			slog.Float64("duration_ms", millisSince(start)),
+			slog.Int64("bytes", rec.bytes),
+		)
+	})
 }
