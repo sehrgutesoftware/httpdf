@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/handlers"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
@@ -12,9 +13,10 @@ import (
 
 type server struct {
 	*http.ServeMux
-	httpdf HTTPDF
-	loader template.Loader
-	cache  map[string]*template.Template
+	httpdf  HTTPDF
+	loader  template.Loader
+	cache   map[string]*template.Template
+	cacheMu sync.Mutex
 }
 
 func NewServer(httpdf HTTPDF, loader template.Loader) http.Handler {
@@ -116,6 +118,9 @@ func (s *server) assets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) cachedTemplate(name string) (*template.Template, error) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
 	if t, ok := s.cache[name]; ok {
 		return t, nil
 	}

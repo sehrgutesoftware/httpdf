@@ -75,8 +75,9 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 }
 
 func (h *httpdf) temporaryServer(ctx context.Context, handler http.Handler) (string, error) {
-	// Assign a random free local TCP port for the temporary server
-	listener, err := net.Listen("tcp", ":0")
+	// Assign a random free TCP port on the loopback interface, so the page is
+	// only reachable from within the host/container.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", fmt.Errorf("temporary server: %w", err)
 	}

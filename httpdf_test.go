@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/kaptinlin/jsonschema"
@@ -20,10 +21,12 @@ import (
 // the output, regardless of the response status.
 type fetchingRenderer struct {
 	called bool
+	url    string
 }
 
 func (r *fetchingRenderer) Render(ctx context.Context, url string, out io.Writer, opts pdf.RenderOpts) error {
 	r.called = true
+	r.url = url
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -76,6 +79,18 @@ func TestHTTPDF_Generate(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "Hello World", out.String())
+	})
+
+	t.Run("it_serves_the_page_on_loopback_only", func(t *testing.T) {
+		renderer := &fetchingRenderer{}
+		tmpl := newTemplate(t, `Hello`, `{}`)
+
+		err := httpdf.New(renderer).Generate(context.Background(), tmpl, "", map[string]any{}, io.Discard)
+
+		require.NoError(t, err)
+		u, err := url.Parse(renderer.url)
+		require.NoError(t, err)
+		assert.Equal(t, "127.0.0.1", u.Hostname())
 	})
 
 	t.Run("it_returns_an_error_on_invalid_values", func(t *testing.T) {

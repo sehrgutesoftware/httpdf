@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sehrgutesoftware/httpdf"
@@ -17,9 +19,11 @@ import (
 
 type stubLoader struct {
 	templates map[string]*template.Template
+	loads     atomic.Int32
 }
 
 func (l *stubLoader) Load(name string) (*template.Template, error) {
+	l.loads.Add(1)
 	if t, ok := l.templates[name]; ok {
 		return t, nil
 	}
@@ -83,5 +87,29 @@ func TestServer_Render(t *testing.T) {
 		rec := render(&stubHTTPDF{err: errors.New("browser exploded")}, "known", `{}`)
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+}
+
+func TestServer_TemplateCache(t *testing.T) {
+	t.Run("it_loads_a_template_once_under_concurrent_requests", func(t *testing.T) {
+		loader := &stubLoader{templates: map[string]*template.Template{
+			"known": {},
+		}}
+		server := httpdf.NewServer(&stubHTTPDF{}, loader)
+
+		var wg sync.WaitGroup
+		for range 50 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				req := httptest.NewRequest(http.MethodPost, "/templates/known/render", strings.NewReader(`{}`))
+				rec := httptest.NewRecorder()
+				server.ServeHTTP(rec, req)
+				assert.Equal(t, http.StatusOK, rec.Code)
+			}()
+		}
+		wg.Wait()
+
+		assert.Equal(t, int32(1), loader.loads.Load())
 	})
 }
