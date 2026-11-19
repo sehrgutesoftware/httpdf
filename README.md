@@ -120,6 +120,8 @@ It checks that:
 
 Invalid HTML output or errors in the PDF itself, such as missing assets or broken layouts, **are not** detected (no browser is run during validation).
 
+The server runs the same validation on startup and logs a warning for each invalid template.
+
 #### Template Functions
 
 ##### Base Functions

@@ -50,6 +50,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	warnInvalidTemplates(logger, templatesDir)
+
 	loader := template.NewFSLoader(subdirfs.New(templatesDir))
 	pdfRenderer := pdf.NewRodRenderer(chromiumPath,
 		pdf.WithLogger(logger),

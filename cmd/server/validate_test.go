@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -114,5 +116,70 @@ FAIL  missing
 
 		assert.Equal(t, 1, code)
 		assert.Contains(t, out.String(), "error: read templates directory:")
+	})
+}
+
+func TestWarnInvalidTemplates(t *testing.T) {
+	// logRecords runs warnInvalidTemplates on dir and returns the log records
+	logRecords := func(t *testing.T, dir string) []map[string]any {
+		t.Helper()
+		var buf bytes.Buffer
+		warnInvalidTemplates(newLogger(&buf, "json", slog.LevelInfo), dir)
+
+		var records []map[string]any
+		for line := range bytes.Lines(buf.Bytes()) {
+			var record map[string]any
+			require.NoError(t, json.Unmarshal(line, &record))
+			delete(record, "time")
+			records = append(records, record)
+		}
+		return records
+	}
+
+	t.Run("it_logs_a_summary_when_all_templates_are_valid", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTemplate(t, dir, "invoice", nil)
+		writeTemplate(t, dir, "label", nil)
+
+		records := logRecords(t, dir)
+
+		assert.Equal(t, []map[string]any{
+			{"level": "INFO", "msg": "templates validated", "total": 2.0, "invalid": 0.0},
+		}, records)
+	})
+
+	t.Run("it_warns_about_each_invalid_template", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTemplate(t, dir, "bad-config", map[string]string{"config.yaml": "page: {width: 210}\n"})
+		writeTemplate(t, dir, "bad-syntax", map[string]string{"template.html": "{{if .name}}"})
+		writeTemplate(t, dir, "valid", nil)
+
+		records := logRecords(t, dir)
+
+		assert.Equal(t, []map[string]any{
+			{
+				"level":    "WARN",
+				"msg":      "template invalid",
+				"template": "bad-config",
+				"error":    "invalid config: page.height must be greater than 0",
+			},
+			{
+				"level":    "WARN",
+				"msg":      "template invalid",
+				"template": "bad-syntax",
+				"error":    "parse template: template: template.html:1: unexpected EOF",
+			},
+			{"level": "WARN", "msg": "templates validated", "total": 3.0, "invalid": 2.0},
+		}, records)
+	})
+
+	t.Run("it_warns_when_there_are_no_templates", func(t *testing.T) {
+		dir := t.TempDir()
+
+		records := logRecords(t, dir)
+
+		assert.Equal(t, []map[string]any{
+			{"level": "WARN", "msg": "templates not validated", "error": "no templates found in " + dir},
+		}, records)
 	})
 }
