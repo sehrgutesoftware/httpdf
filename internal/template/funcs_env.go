@@ -1,8 +1,8 @@
 package template
 
 import (
+	"html/template"
 	"os"
-	"text/template"
 )
 
 func envTemplateFuncs(funcs template.FuncMap, exposedEnvVars []string) {

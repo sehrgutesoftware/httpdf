@@ -1,9 +1,11 @@
 package template
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"slices"
 	"strings"
@@ -11,13 +13,28 @@ import (
 	"github.com/kaptinlin/jsonschema"
 )
 
+// unsafePlaceholder is what html/template inserts in place of values that are
+// unsafe in their context, e.g. a data URL in a src attribute.
+const unsafePlaceholder = "ZgotmplZ"
+
 // Validate reports errors that would otherwise only surface when the template
-// is rendered: syntax errors and undefined functions in the template and its
-// partials. If the template has example data, the example must match the
-// schema and render without errors in every configured locale.
+// is rendered: syntax errors, undefined functions and escaping errors, such as
+// references to missing partials, in the template and its partials. If the
+// template has example data, the example must match the schema and render in
+// every configured locale without errors or values replaced as unsafe.
 func (t *Template) Validate() error {
-	if _, err := t.parse("/assets", ""); err != nil {
+	parsed, err := t.parse("/assets", "")
+	if err != nil {
 		return err
+	}
+
+	// html/template escapes the template on its first execution, regardless of
+	// the data. Errors of the execution itself are irrelevant without data.
+	if err := parsed.Execute(io.Discard, nil); err != nil {
+		var escapeErr *template.Error
+		if errors.As(err, &escapeErr) {
+			return fmt.Errorf("escape template: %w", err)
+		}
 	}
 
 	if t.Example == nil {
@@ -47,7 +64,7 @@ func (t *Template) Validate() error {
 	var failures []*failure
 	byMessage := make(map[string]*failure)
 	for _, locale := range locales {
-		err := t.Render(t.Example, "/assets", locale, io.Discard)
+		err := t.renderExample(locale)
 		if err == nil {
 			continue
 		}
@@ -70,6 +87,24 @@ func (t *Template) Validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// renderExample renders the example data in the given locale. html/template
+// doesn't fail on unsafe values, but replaces them, so those are reported too.
+func (t *Template) renderExample(locale string) error {
+	var out bytes.Buffer
+	if err := t.Render(t.Example, "/assets", locale, &out); err != nil {
+		return err
+	}
+
+	switch n := bytes.Count(out.Bytes(), []byte(unsafePlaceholder)); n {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("html/template replaced 1 unsafe value with %q, e.g. a data URL in a src attribute; mark trusted values with safeURL or safeCSS", unsafePlaceholder)
+	default:
+		return fmt.Errorf("html/template replaced %d unsafe values with %q, e.g. data URLs in src attributes; mark trusted values with safeURL or safeCSS", n, unsafePlaceholder)
+	}
 }
 
 // schemaErrors lists the errors of a failed schema validation, along with the

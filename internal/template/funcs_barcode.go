@@ -3,8 +3,8 @@ package template
 import (
 	"bytes"
 	"encoding/base64"
+	"html/template"
 	"image/png"
-	"text/template"
 
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/qr"
@@ -15,8 +15,9 @@ func barcodeTemplateFuncs(funcs template.FuncMap) {
 }
 
 // qrCodeFunc generates a QR code from the given data and returns it as a data
-// URL containing a PNG image.
-func qrCodeFunc(size int, data string) string {
+// URL containing a PNG image. It's typed as a URL, because html/template would
+// otherwise replace the data URL with a placeholder in src attributes.
+func qrCodeFunc(size int, data string) template.URL {
 	if size <= 0 {
 		size = 256 // default size
 	}
@@ -26,5 +27,5 @@ func qrCodeFunc(size int, data string) string {
 	buf := bytes.NewBuffer(nil)
 	png.Encode(buf, qrCode)
 
-	return "data:image/png;base64," + base64.RawStdEncoding.EncodeToString(buf.Bytes())
+	return template.URL("data:image/png;base64," + base64.RawStdEncoding.EncodeToString(buf.Bytes()))
 }

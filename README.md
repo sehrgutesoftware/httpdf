@@ -63,6 +63,8 @@ The template is identified by its folder name. In the above example, the name of
 
 `template.html` itself must contain valid (= renderable by Chromium) HTML, using [html/template](https://pkg.go.dev/html/template) as a templating language.
 
+Values are escaped according to the context they're inserted into: HTML text, attribute values, URLs, CSS or JavaScript. This prevents request data from injecting markup or scripts into the page. Values that are unsafe in their context are replaced with `ZgotmplZ`, e.g. a `data:` URL in a `src` attribute or `rgb(0, 0, 0)` in a `style` attribute. To insert trusted values as they are, use the `safeHTML`, `safeURL` and `safeCSS` functions. HTML comments are removed from the output.
+
 `schema.json` must be a valid JSON Schema according to [Draft 2020-12](https://json-schema.org/draft/2020-12). Its purpose is to validate the input data before populating the HTML template. Though not recommended, the schema can be empty (define an object with no properties). If your template is using placeholders that are not defined in the schema, you risk getting unclear errors during template rendering.
 
 `config.yaml` contains configuration values related to the template. It has the following structure:
@@ -130,6 +132,7 @@ The server runs the same validation on startup and logs a warning for each inval
 - All [Sprig](https://masterminds.github.io/sprig/) functions for general template operations
 - `asset`: Generate asset URLs with the configured assets prefix. Usage: `{{ asset "style.css" }}` or `{{ asset "images" "logo.png" }}`
 - `chunk`: Takes an array and returns an array of arrays with n elements each. Usage: `{{ chunk .items 2 }}`
+- `safeHTML`, `safeURL`, `safeCSS`: Mark a value as trusted HTML, URL or CSS, so it's inserted without escaping. Never use them on values you don't trust, such as request data entered by end users. Usage: `{{ tr "terms" | safeHTML }}` or `<img src="{{ .logo | safeURL }}">`
 
 ##### Asset URL (`asset` function)
 

@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - This CHANGELOG.md
+- `safeHTML`, `safeURL` and `safeCSS` template functions, which insert trusted values without escaping.
+
+### Changed
+
+- **Breaking:** Templates are rendered with Go's `html/template` instead of `text/template`, as the documentation always stated. Values are escaped according to the context they're inserted into (HTML text, attributes, URLs, CSS or JavaScript), and HTML comments are removed from the output. Check your templates for the following:
+  - Values containing markup are escaped, e.g. translations with HTML tags. Mark trusted ones with `safeHTML`: `{{ tr "terms" | safeHTML }}`.
+  - Values that are unsafe in their context are replaced with `ZgotmplZ`, e.g. `data:` URLs from the request data in a `src` attribute, or CSS values like `rgb(0, 0, 0)` in a `style` attribute. Mark trusted ones with `safeURL` or `safeCSS`.
+  - In `<script>` elements, values are encoded as JavaScript, so `var items = {{ .items | toJson }};` turns the items into a string. Use `var items = {{ .items }};` instead.
+
+  `httpdf-server validate` helps with the migration: it reports values replaced with `ZgotmplZ` when rendering the example data, and template actions in ambiguous contexts, e.g. inside an unclosed attribute.
+
+### Security
+
+- Request data is escaped. Before, it was inserted into the HTML verbatim, so anyone who controlled a value could inject markup and scripts into the page Chromium renders, e.g. to load internal URLs into the PDF.
 
 ## [0.10.1] - 2026-11-19
 

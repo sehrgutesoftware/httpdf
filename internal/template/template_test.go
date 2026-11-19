@@ -151,6 +151,41 @@ func TestRender(t *testing.T) {
 		assert.Contains(t, err.Error(), "execute template")
 	})
 
+	t.Run("it_escapes_values_according_to_their_context", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString(`<p title="{{.name}}">{{.name}}</p><a href="{{.url}}"></a><script>var name = {{.name}};</script>`)
+
+		var output bytes.Buffer
+		values := map[string]any{
+			"name": `<script>alert("hi")</script>`,
+			"url":  "javascript:alert(1)",
+		}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, `<p title="&lt;script&gt;alert(&#34;hi&#34;)&lt;/script&gt;">&lt;script&gt;alert(&#34;hi&#34;)&lt;/script&gt;</p>`+
+			`<a href="#ZgotmplZ"></a>`+
+			`<script>var name = "\u003cscript\u003ealert(\"hi\")\u003c/script\u003e";</script>`, output.String())
+	})
+
+	t.Run("it_inserts_values_marked_as_trusted_without_escaping", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString(`{{.html | safeHTML}}<img src="{{.logo | safeURL}}"><p style="color: {{.color | safeCSS}}"></p>`)
+
+		var output bytes.Buffer
+		values := map[string]any{
+			"html":  "<strong>bold</strong>",
+			"logo":  "data:image/png;base64,AAAA",
+			"color": "rgb(0, 0, 0)",
+		}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, `<strong>bold</strong><img src="data:image/png;base64,AAAA"><p style="color: rgb(0, 0, 0)"></p>`, output.String())
+	})
+
 	t.Run("it_returns_an_error_if_template_execution_fails", func(t *testing.T) {
 		tmpl := &template.Template{}
 		tmpl.WriteString("{{index .items \"badkey\"}}")

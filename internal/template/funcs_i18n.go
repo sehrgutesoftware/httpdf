@@ -1,7 +1,7 @@
 package template
 
 import (
-	"text/template"
+	"html/template"
 
 	"github.com/kaptinlin/go-i18n"
 )

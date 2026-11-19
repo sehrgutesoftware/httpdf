@@ -117,14 +117,54 @@ func TestValidate(t *testing.T) {
 /items/0/qty: 0 should be at least 1`, err.Error())
 	})
 
-	t.Run("it_reports_errors_when_rendering_the_example_data", func(t *testing.T) {
-		tmpl := &template.Template{Example: map[string]any{}}
+	t.Run("it_reports_references_to_missing_partials_without_example_data", func(t *testing.T) {
+		tmpl := &template.Template{}
 		tmpl.WriteString(`{{template "missing.html" .}}`)
 
 		err := tmpl.Validate()
 
-		assert.ErrorContains(t, err, `render example data: execute template: template: template.html:1:11: executing "template.html"`)
-		assert.ErrorContains(t, err, `template "missing.html" not defined`)
+		assert.EqualError(t, err, `escape template: html/template:template.html:1:11: no such template "missing.html"`)
+	})
+
+	t.Run("it_reports_actions_in_ambiguous_contexts", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString(`<a href="{{.url}}`)
+
+		err := tmpl.Validate()
+
+		assert.ErrorContains(t, err, "escape template: html/template:template.html:")
+		assert.ErrorContains(t, err, "ends in a non-text context")
+	})
+
+	t.Run("it_reports_errors_when_rendering_the_example_data", func(t *testing.T) {
+		tmpl := &template.Template{Example: map[string]any{}}
+		tmpl.WriteString(`{{index .missing 0}}`)
+
+		err := tmpl.Validate()
+
+		assert.ErrorContains(t, err, `render example data: execute template: template: template.html:1:2: executing "template.html" at <index .missing 0>`)
+	})
+
+	t.Run("it_reports_values_that_html_template_replaced_as_unsafe", func(t *testing.T) {
+		tmpl := &template.Template{Example: map[string]any{
+			"logo":  "data:image/png;base64,AAAA",
+			"color": "rgb(0, 0, 0)",
+		}}
+		tmpl.WriteString(`<img src="{{.logo}}"><p style="color: {{.color}}">`)
+
+		err := tmpl.Validate()
+
+		assert.EqualError(t, err, `render example data: html/template replaced 2 unsafe values with "ZgotmplZ", e.g. data URLs in src attributes; mark trusted values with safeURL or safeCSS`)
+	})
+
+	t.Run("it_passes_values_marked_as_trusted", func(t *testing.T) {
+		tmpl := &template.Template{Example: map[string]any{
+			"logo":  "data:image/png;base64,AAAA",
+			"color": "rgb(0, 0, 0)",
+		}}
+		tmpl.WriteString(`<img src="{{.logo | safeURL}}"><p style="color: {{.color | safeCSS}}">`)
+
+		assert.NoError(t, tmpl.Validate())
 	})
 
 	t.Run("it_renders_the_example_data_in_every_locale", func(t *testing.T) {

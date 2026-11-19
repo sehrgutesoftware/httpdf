@@ -2,10 +2,11 @@ package template
 
 import (
 	"encoding/base64"
+	"html"
+	"html/template"
 	"os"
 	"strings"
 	"testing"
-	"text/template"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -458,7 +459,7 @@ func TestQrCodeFunc(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := qrCodeFunc(tt.size, tt.data)
+			result := string(qrCodeFunc(tt.size, tt.data))
 
 			// Check that result starts with the correct data URL prefix
 			assert.True(t, strings.HasPrefix(result, "data:image/png;base64,"),
@@ -492,12 +493,14 @@ func TestQrCodeFuncInTemplate(t *testing.T) {
 	// Check that qrCode function is available
 	assert.NotNil(t, funcs["qrCode"])
 
+	// The QR codes are used as image sources, where html/template would
+	// replace any untyped data URL with a placeholder
 	tmpl := template.New("test").Funcs(funcs)
 	tmpl, err := tmpl.Parse(`
-QR Small: {{qrCode 64 "Small QR"}}
-QR Default: {{qrCode 0 "Default Size"}}
-QR Large: {{qrCode 256 "Large QR Code"}}
-QR URL: {{qrCode 128 "https://example.com"}}
+QR Small: <img src="{{qrCode 64 "Small QR"}}">
+QR Default: <img src="{{qrCode 0 "Default Size"}}">
+QR Large: <img src="{{qrCode 256 "Large QR Code"}}">
+QR URL: <img src="{{qrCode 128 "https://example.com"}}">
 `)
 	require.NoError(t, err)
 
@@ -505,13 +508,16 @@ QR URL: {{qrCode 128 "https://example.com"}}
 	err = tmpl.Execute(&result, nil)
 	require.NoError(t, err)
 
-	output := result.String()
+	// Characters such as "+" are escaped as HTML entities in the attributes,
+	// which the browser decodes again
+	output := html.UnescapeString(result.String())
 
 	// Check that all QR codes are generated as proper data URLs
-	assert.Contains(t, output, "QR Small: data:image/png;base64,")
-	assert.Contains(t, output, "QR Default: data:image/png;base64,")
-	assert.Contains(t, output, "QR Large: data:image/png;base64,")
-	assert.Contains(t, output, "QR URL: data:image/png;base64,")
+	assert.NotContains(t, output, "ZgotmplZ")
+	assert.Contains(t, output, `QR Small: <img src="data:image/png;base64,`)
+	assert.Contains(t, output, `QR Default: <img src="data:image/png;base64,`)
+	assert.Contains(t, output, `QR Large: <img src="data:image/png;base64,`)
+	assert.Contains(t, output, `QR URL: <img src="data:image/png;base64,`)
 
 	// Verify that we have different base64 content for different inputs
 	lines := strings.Split(output, "\n")
@@ -530,7 +536,7 @@ QR URL: {{qrCode 128 "https://example.com"}}
 	for i, line := range qrLines {
 		parts := strings.Split(line, "data:image/png;base64,")
 		require.Len(t, parts, 2, "Should have exactly one data URL per line")
-		base64Parts[i] = strings.TrimSpace(parts[1])
+		base64Parts[i] = strings.TrimSuffix(strings.TrimSpace(parts[1]), `">`)
 
 		// Verify each base64 is valid
 		_, err := base64.RawStdEncoding.DecodeString(base64Parts[i])
@@ -555,10 +561,10 @@ func TestBarcodeTemplateFuncsIntegration(t *testing.T) {
 	assert.NotNil(t, funcs["qrCode"])
 
 	// Verify the function signature
-	qrCodeFunc, ok := funcs["qrCode"].(func(int, string) string)
+	qrCodeFunc, ok := funcs["qrCode"].(func(int, string) template.URL)
 	assert.True(t, ok, "qrCode function should have correct signature")
 
 	// Test the function directly
 	result := qrCodeFunc(100, "test")
-	assert.True(t, strings.HasPrefix(result, "data:image/png;base64,"))
+	assert.True(t, strings.HasPrefix(string(result), "data:image/png;base64,"))
 }

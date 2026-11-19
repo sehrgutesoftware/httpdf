@@ -1,8 +1,8 @@
 package template
 
 import (
+	"html/template"
 	"path"
-	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
 )
@@ -11,7 +11,16 @@ func templateFuncs(assetsPrefix string) template.FuncMap {
 	funcs := sprig.FuncMap()
 	funcs["chunk"] = chunk
 	funcs["asset"] = assetsFunc(assetsPrefix)
+	safeTemplateFuncs(funcs)
 	return funcs
+}
+
+// safeTemplateFuncs adds functions that mark values as trusted, so html/template
+// inserts them without escaping. They must not be used on untrusted data.
+func safeTemplateFuncs(funcs template.FuncMap) {
+	funcs["safeHTML"] = func(s string) template.HTML { return template.HTML(s) }
+	funcs["safeURL"] = func(s string) template.URL { return template.URL(s) }
+	funcs["safeCSS"] = func(s string) template.CSS { return template.CSS(s) }
 }
 
 // chunk takes an array and returns an array of arrays with n elements each.

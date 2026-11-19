@@ -3,9 +3,9 @@ package template
 import (
 	"bytes"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
-	"text/template"
 
 	"github.com/kaptinlin/go-i18n"
 	"github.com/kaptinlin/jsonschema"
