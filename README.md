@@ -23,13 +23,27 @@ The web service can be run as a simple go binary or as a [docker image](https://
 | -------------------- | ------- | ----------- |
 | `HTTPDF_LOG_FORMAT`  | `json`  | Log format written to stdout: `json` or `text`. |
 | `HTTPDF_LOG_LEVEL`   | `info`  | Minimum log level: `trace`, `debug`, `info`, `warn` or `error`. `trace` includes Chromium's output, which is useful for debugging the browser. |
+| `HTTPDF_MAX_REQUEST_MB` | `10` | Maximum size of a render request's body in megabytes. Larger requests are rejected with `413`. |
+| `HTTPDF_MAX_CONCURRENT_RENDERS` | number of CPUs | Maximum number of PDFs rendered at the same time. Further requests wait for a free slot. |
+| `HTTPDF_RENDER_TIMEOUT` | `20s` | Maximum duration of a render, including the time spent waiting for a free slot, e.g. `20s` or `1m`. Keep it below 25 seconds, the time in-flight requests get to complete on shutdown. |
 
 ### API
 
 #### `POST /templates/{template}/render`
 Render the template using the JSON-encoded data provided in the request body. Successful response is of `Content-Type: application/pdf`. Templates are loaded on first use and cached in memory. In order to reload a template, the server must be restarted.
 
-Error responses: `400` if the request body is not valid JSON, `404` if the template does not exist, `422` if the data does not match the template's schema, `500` for any other failure.
+##### Response Status Codes
+
+| Code | Meaning |
+| ---- | ------- |
+| `200` | Render success |
+| `400` | Request body is not valid JSON |
+| `404` | Template does not exist |
+| `413` | Request body exceeds `HTTPDF_MAX_REQUEST_MB` |
+| `422` | Request data does not match the template's schema |
+| `503` | No render slot became available within `HTTPDF_RENDER_TIMEOUT`. Response contains a `Retry-After` header |
+| `504` | Render did not complete within `HTTPDF_RENDER_TIMEOUT` |
+| `500` | Unknown server error. Check the server logs and optionally open a bug report |
 
 #### `GET /templates/{template}/preview`
 Render an HTML preview of the template using data from the template's `example.json` file. Useful for template development. The preview endpoint reads the template from disk on each request, so you can test changes without restarting the server.

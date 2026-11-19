@@ -20,6 +20,16 @@ import (
 var (
 	// ErrInvalidValues is returned when the values are invalid
 	ErrInvalidValues = errors.New("invalid values")
+
+	// ErrBusy is returned when no render slot became available in time
+	ErrBusy = errors.New("too many concurrent renders")
+
+	// ErrRenderTimeout is returned when rendering took too long
+	ErrRenderTimeout = errors.New("render timed out")
+
+	// errTimeout is the cause of the render context when its timeout expires,
+	// which distinguishes it from a client that went away
+	errTimeout = errors.New("render timeout expired")
 )
 
 // HTTPDF is the interface for the httpdf service.
@@ -30,8 +40,10 @@ type HTTPDF interface {
 
 // httpdf is the core implementation of the httpdf service.
 type httpdf struct {
-	pdfRenderer pdf.Renderer
-	logger      *slog.Logger
+	pdfRenderer   pdf.Renderer
+	logger        *slog.Logger
+	renderSlots   chan struct{}
+	renderTimeout time.Duration
 }
 
 // New creates a new httpdf service.
@@ -41,13 +53,18 @@ func New(
 ) HTTPDF {
 	o := newOptions(opts)
 	return &httpdf{
-		pdfRenderer: pdfRenderer,
-		logger:      o.logger,
+		pdfRenderer:   pdfRenderer,
+		logger:        o.logger,
+		renderSlots:   make(chan struct{}, max(1, o.maxConcurrentRenders)),
+		renderTimeout: o.renderTimeout,
 	}
 }
 
 // Generate a PDF from the given template and values.
 func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale string, v map[string]any, w io.Writer) error {
+	ctx, cancelTimeout := context.WithTimeoutCause(ctx, h.renderTimeout, errTimeout)
+	defer cancelTimeout()
+
 	if valid := t.Schema.Validate(v); !valid.Valid {
 		return fmt.Errorf("%w: %v", ErrInvalidValues, valid.Errors)
 	}
@@ -58,6 +75,19 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 	if err := t.Render(v, "/assets", locale, &html); err != nil {
 		return fmt.Errorf("render template: %w", err)
 	}
+
+	// Only the browser's part is limited, so invalid requests fail right away
+	queued := time.Now()
+	select {
+	case h.renderSlots <- struct{}{}:
+		defer func() { <-h.renderSlots }()
+	case <-ctx.Done():
+		if context.Cause(ctx) == errTimeout {
+			return fmt.Errorf("%w: no render slot became available within %s", ErrBusy, h.renderTimeout)
+		}
+		return ctx.Err()
+	}
+	addLogAttrs(ctx, slog.Float64("queue_ms", logging.MillisSince(queued)))
 
 	srvCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -74,6 +104,9 @@ func (h *httpdf) Generate(ctx context.Context, t *template.Template, locale stri
 		GenerateTaggedPDF:       t.Config.PDF.GenerateTaggedPDF,
 		GenerateDocumentOutline: t.Config.PDF.GenerateDocumentOutline,
 	}); err != nil {
+		if context.Cause(ctx) == errTimeout {
+			return fmt.Errorf("%w after %s: %w", ErrRenderTimeout, h.renderTimeout, err)
+		}
 		return fmt.Errorf("render PDF: %w", err)
 	}
 

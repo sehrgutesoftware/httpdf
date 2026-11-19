@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +30,14 @@ const (
 	// shutdownTimeout is how long in-flight requests may take to complete after
 	// a shutdown signal.
 	shutdownTimeout = 25 * time.Second
+
+	// The HTTP server's timeouts protect against clients that send or read
+	// slowly. Reading a request's header and body counts towards the write
+	// timeout, which is added on top of the render timeout.
+	readHeaderTimeout  = 10 * time.Second
+	readTimeout        = 30 * time.Second
+	writeTimeoutMargin = 30 * time.Second
+	idleTimeout        = 120 * time.Second
 )
 
 // version is set at build time: go build -ldflags "-X main.version=1.2.3"
@@ -41,28 +50,33 @@ func main() {
 
 	logFormat, errLogFormat := envLogFormat("HTTPDF_LOG_FORMAT")
 	logLevel, errLogLevel := envLogLevel("HTTPDF_LOG_LEVEL")
+	maxRequestMB, errMaxRequestMB := envPositiveInt("HTTPDF_MAX_REQUEST_MB", httpdf.DefaultMaxRequestSize>>20)
+	maxRenders, errMaxRenders := envPositiveInt("HTTPDF_MAX_CONCURRENT_RENDERS", httpdf.DefaultMaxConcurrentRenders())
+	renderTimeout, errRenderTimeout := envPositiveDuration("HTTPDF_RENDER_TIMEOUT", httpdf.DefaultRenderTimeout)
 
 	logger := newLogger(os.Stdout, logFormat, logLevel)
 	slog.SetDefault(logger)
 
-	if err := errors.Join(errLogFormat, errLogLevel); err != nil {
+	if err := errors.Join(errLogFormat, errLogLevel, errMaxRequestMB, errMaxRenders, errRenderTimeout); err != nil {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
 
 	warnInvalidTemplates(logger, templatesDir)
 
+	opts := []httpdf.Option{
+		httpdf.WithLogger(logger),
+		httpdf.WithMaxRequestSize(int64(maxRequestMB) << 20),
+		httpdf.WithMaxConcurrentRenders(maxRenders),
+		httpdf.WithRenderTimeout(renderTimeout),
+	}
 	loader := template.NewFSLoader(subdirfs.New(templatesDir))
 	pdfRenderer := pdf.NewRodRenderer(chromiumPath,
 		pdf.WithLogger(logger),
 		pdf.WithCreatorPrefix("httpdf/"+version),
 	)
-	app := httpdf.New(pdfRenderer, httpdf.WithLogger(logger))
-
-	server := &http.Server{
-		Handler:  httpdf.NewServer(app, loader, httpdf.WithLogger(logger)),
-		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
-	}
+	app := httpdf.New(pdfRenderer, opts...)
+	server := newHTTPServer(httpdf.NewServer(app, loader, opts...), logger, renderTimeout)
 
 	listener, err := net.Listen("tcp", listenOn)
 	if err != nil {
@@ -77,6 +91,9 @@ func main() {
 		"log_level", logging.LevelName(logLevel),
 		"chromium", chromiumPath,
 		"templates", templatesDir,
+		"max_request_mb", maxRequestMB,
+		"max_concurrent_renders", maxRenders,
+		"render_timeout", renderTimeout.String(),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -124,6 +141,19 @@ func serve(ctx context.Context, server *http.Server, listener net.Listener, logg
 	return nil
 }
 
+// newHTTPServer creates the HTTP server. Its write timeout covers reading the
+// request, waiting for a render slot, rendering and sending the PDF.
+func newHTTPServer(handler http.Handler, logger *slog.Logger, renderTimeout time.Duration) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      readTimeout + renderTimeout + writeTimeoutMargin,
+		IdleTimeout:       idleTimeout,
+	}
+}
+
 // newLogger creates a logger writing in the given format ("json" or "text")
 func newLogger(w io.Writer, format string, level slog.Level) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: level, ReplaceAttr: logging.ReplaceLevelName}
@@ -158,4 +188,34 @@ func envLogLevel(name string) (slog.Level, error) {
 		return slog.LevelInfo, fmt.Errorf("%s: must be trace, debug, info, warn or error, got %q", name, v)
 	}
 	return level, nil
+}
+
+// envPositiveInt reads a positive integer from the named env var. Defaults to
+// def.
+func envPositiveInt(name string, def int) (int, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return def, nil
+	}
+
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def, fmt.Errorf("%s: must be a positive integer, got %q", name, v)
+	}
+	return n, nil
+}
+
+// envPositiveDuration reads a positive duration, such as 20s or 1m30s, from the
+// named env var. Defaults to def.
+func envPositiveDuration(name string, def time.Duration) (time.Duration, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return def, nil
+	}
+
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return def, fmt.Errorf("%s: must be a positive duration such as 20s, got %q", name, v)
+	}
+	return d, nil
 }

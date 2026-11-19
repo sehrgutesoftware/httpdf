@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/sehrgutesoftware/httpdf/internal/logging"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +71,76 @@ func TestEnvLogLevel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnvPositiveInt(t *testing.T) {
+	cases := map[string]struct {
+		value   string
+		want    int
+		wantErr bool
+	}{
+		"defaults_to_the_default":                    {value: "", want: 7},
+		"accepts_a_positive_integer":                 {value: "3", want: 3},
+		"rejects_zero_and_falls_back_to_the_default": {value: "0", want: 7, wantErr: true},
+		"rejects_negative_numbers":                   {value: "-1", want: 7, wantErr: true},
+		"rejects_fractions":                          {value: "1.5", want: 7, wantErr: true},
+		"rejects_non_numeric_values":                 {value: "many", want: 7, wantErr: true},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("TEST_INT", tc.value)
+
+			got, err := envPositiveInt("TEST_INT", 7)
+
+			assert.Equal(t, tc.want, got)
+			if tc.wantErr {
+				assert.ErrorContains(t, err, "TEST_INT: must be a positive integer")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestEnvPositiveDuration(t *testing.T) {
+	cases := map[string]struct {
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		"defaults_to_the_default":                    {value: "", want: 20 * time.Second},
+		"accepts_a_duration":                         {value: "1m30s", want: 90 * time.Second},
+		"rejects_zero_and_falls_back_to_the_default": {value: "0s", want: 20 * time.Second, wantErr: true},
+		"rejects_negative_durations":                 {value: "-5s", want: 20 * time.Second, wantErr: true},
+		"rejects_numbers_without_unit":               {value: "20", want: 20 * time.Second, wantErr: true},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("TEST_DURATION", tc.value)
+
+			got, err := envPositiveDuration("TEST_DURATION", 20*time.Second)
+
+			assert.Equal(t, tc.want, got)
+			if tc.wantErr {
+				assert.ErrorContains(t, err, "TEST_DURATION: must be a positive duration")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestNewHTTPServer(t *testing.T) {
+	t.Run("it_sets_timeouts_that_leave_room_for_the_render", func(t *testing.T) {
+		server := newHTTPServer(http.NotFoundHandler(), slog.New(slog.DiscardHandler), 20*time.Second)
+
+		assert.Equal(t, 10*time.Second, server.ReadHeaderTimeout)
+		assert.Equal(t, 30*time.Second, server.ReadTimeout)
+		assert.Equal(t, 80*time.Second, server.WriteTimeout)
+		assert.Equal(t, 120*time.Second, server.IdleTimeout)
+	})
 }
 
 func TestNewLogger(t *testing.T) {

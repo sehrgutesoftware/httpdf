@@ -15,23 +15,29 @@ import (
 	"github.com/sehrgutesoftware/httpdf/internal/template"
 )
 
+// retryAfterBusy is the Retry-After value in seconds of responses to requests
+// that didn't get a render slot in time
+const retryAfterBusy = "5"
+
 type server struct {
 	*http.ServeMux
-	httpdf  HTTPDF
-	loader  template.Loader
-	logger  *slog.Logger
-	cache   map[string]*template.Template
-	cacheMu sync.Mutex
+	httpdf         HTTPDF
+	loader         template.Loader
+	logger         *slog.Logger
+	maxRequestSize int64
+	cache          map[string]*template.Template
+	cacheMu        sync.Mutex
 }
 
 func NewServer(httpdf HTTPDF, loader template.Loader, opts ...Option) http.Handler {
 	o := newOptions(opts)
 	server := &server{
-		ServeMux: http.NewServeMux(),
-		httpdf:   httpdf,
-		loader:   loader,
-		logger:   o.logger,
-		cache:    make(map[string]*template.Template),
+		ServeMux:       http.NewServeMux(),
+		httpdf:         httpdf,
+		loader:         loader,
+		logger:         o.logger,
+		maxRequestSize: o.maxRequestSize,
+		cache:          make(map[string]*template.Template),
 	}
 
 	server.Handle("GET /healthz", http.HandlerFunc(server.healthz))
@@ -65,7 +71,14 @@ func (s *server) render(w http.ResponseWriter, r *http.Request) {
 	)
 
 	var values map[string]any
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestSize)
 	if err := json.NewDecoder(r.Body).Decode(&values); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			msg := fmt.Sprintf("request body exceeds %d bytes", tooLarge.Limit)
+			httpError(w, r, msg, http.StatusRequestEntityTooLarge, err)
+			return
+		}
 		httpError(w, r, "invalid request body", http.StatusBadRequest, err)
 		return
 	}
@@ -84,6 +97,13 @@ func (s *server) render(w http.ResponseWriter, r *http.Request) {
 	err = s.httpdf.Generate(r.Context(), t, locale, values, w)
 	if errors.Is(err, ErrInvalidValues) {
 		httpError(w, r, err.Error(), http.StatusUnprocessableEntity, err)
+		return
+	} else if errors.Is(err, ErrBusy) {
+		w.Header().Set("Retry-After", retryAfterBusy)
+		httpError(w, r, err.Error(), http.StatusServiceUnavailable, err)
+		return
+	} else if errors.Is(err, ErrRenderTimeout) {
+		httpError(w, r, err.Error(), http.StatusGatewayTimeout, err)
 		return
 	} else if err != nil {
 		httpError(w, r, err.Error(), http.StatusInternalServerError, err)

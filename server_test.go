@@ -47,8 +47,8 @@ func TestServer_Render(t *testing.T) {
 		"known": {},
 	}}
 
-	render := func(generator httpdf.HTTPDF, tmpl string, body string) *httptest.ResponseRecorder {
-		server := httpdf.NewServer(generator, loader)
+	render := func(generator httpdf.HTTPDF, tmpl string, body string, opts ...httpdf.Option) *httptest.ResponseRecorder {
+		server := httpdf.NewServer(generator, loader, opts...)
 		req := httptest.NewRequest(http.MethodPost, "/templates/"+tmpl+"/render", strings.NewReader(body))
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, req)
@@ -81,6 +81,37 @@ func TestServer_Render(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 		assert.Contains(t, rec.Body.String(), "name is required")
+	})
+
+	t.Run("it_responds_with_413_when_the_body_exceeds_the_limit", func(t *testing.T) {
+		rec := render(&stubHTTPDF{}, "known", `{"name": "World"}`, httpdf.WithMaxRequestSize(10))
+
+		assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+		assert.Contains(t, rec.Body.String(), "request body exceeds 10 bytes")
+	})
+
+	t.Run("it_accepts_a_body_up_to_the_limit", func(t *testing.T) {
+		body := `{"name": "World"}`
+		rec := render(&stubHTTPDF{}, "known", body, httpdf.WithMaxRequestSize(int64(len(body))))
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("it_responds_with_503_and_retry_after_when_busy", func(t *testing.T) {
+		err := fmt.Errorf("%w: no render slot became available within 20s", httpdf.ErrBusy)
+		rec := render(&stubHTTPDF{err: err}, "known", `{}`)
+
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		assert.Equal(t, "5", rec.Header().Get("Retry-After"))
+		assert.Contains(t, rec.Body.String(), "too many concurrent renders")
+	})
+
+	t.Run("it_responds_with_504_when_rendering_times_out", func(t *testing.T) {
+		err := fmt.Errorf("%w after 20s: %w", httpdf.ErrRenderTimeout, context.DeadlineExceeded)
+		rec := render(&stubHTTPDF{err: err}, "known", `{}`)
+
+		assert.Equal(t, http.StatusGatewayTimeout, rec.Code)
+		assert.Contains(t, rec.Body.String(), "render timed out after 20s")
 	})
 
 	t.Run("it_responds_with_500_on_other_errors", func(t *testing.T) {

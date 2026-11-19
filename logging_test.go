@@ -342,6 +342,23 @@ func TestServer_RequestLogCorrelation(t *testing.T) {
 		assert.Equal(t, request["request_id"], inner["request_id"])
 		assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", inner["trace_id"])
 	})
+
+	t.Run("it_logs_the_time_spent_waiting_for_a_render_slot", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := newTestLogger(&buf)
+		loader := &stubLoader{templates: map[string]*template.Template{
+			"hello": newTemplate(t, `Hello`, `{}`),
+		}}
+		app := httpdf.New(&fetchingRenderer{}, httpdf.WithLogger(logger))
+		server := httpdf.NewServer(app, loader, httpdf.WithLogger(logger))
+
+		req := httptest.NewRequest(http.MethodPost, "/templates/hello/render", strings.NewReader(`{}`))
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		assert.Contains(t, logRecord(t, &buf, "request"), "queue_ms")
+	})
 }
 
 func TestServer_TemplateLoadedLog(t *testing.T) {

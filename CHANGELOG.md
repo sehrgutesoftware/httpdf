@@ -11,8 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - This CHANGELOG.md
 - `safeHTML`, `safeURL` and `safeCSS` template functions, which insert trusted values without escaping.
+- Limits for the size of render requests, the number of concurrent renders and the duration of a render, configured via `HTTPDF_MAX_REQUEST_MB`, `HTTPDF_MAX_CONCURRENT_RENDERS` and `HTTPDF_RENDER_TIMEOUT`. The request log contains the time a render waited for a free slot as `queue_ms`.
 
 ### Changed
+
+- **Breaking:** The limits are enforced by default: render requests over 10 MB are rejected with `413`, at most as many PDFs as there are CPUs are rendered at the same time, and renders that take longer than 20 seconds, including the wait for a free slot, are aborted with `503` if they didn't get a slot, or `504` otherwise.
+- The HTTP server times out clients that send or read slowly. A request's header has to arrive within 10 seconds, its body within 30 seconds, and idle connections are closed after 2 minutes.
 
 - **Breaking:** Templates are rendered with Go's `html/template` instead of `text/template`, as the documentation always stated. Values are escaped according to the context they're inserted into (HTML text, attributes, URLs, CSS or JavaScript), and HTML comments are removed from the output. Check your templates for the following:
   - Values containing markup are escaped, e.g. translations with HTML tags. Mark trusted ones with `safeHTML`: `{{ tr "terms" | safeHTML }}`.
