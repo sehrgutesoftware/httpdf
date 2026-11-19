@@ -44,6 +44,8 @@ func (t *Template) Validate() error {
 	if t.Schema != nil {
 		if result := t.Schema.Validate(t.Example); !result.Valid {
 			if errs := schemaErrors(result, ""); len(errs) > 0 {
+				// The nested results come in random order
+				slices.Sort(errs)
 				return fmt.Errorf("example data doesn't match the schema:\n%s", strings.Join(errs, "\n"))
 			}
 			return fmt.Errorf("example data doesn't match the schema: %v", result.Errors)
@@ -129,7 +131,6 @@ func schemaErrors(result *jsonschema.EvaluationResult, parent string) []string {
 		}
 		errs = append(errs, fmt.Sprintf("%s: %s", cmp.Or(location, "/"), err.Error()))
 	}
-	slices.Sort(errs)
 
 	for _, detail := range result.Details {
 		errs = append(errs, schemaErrors(detail, location)...)

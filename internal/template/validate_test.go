@@ -113,8 +113,8 @@ func TestValidate(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, `example data doesn't match the schema:
 /: Required property 'count' is missing
-/name: Value is integer but should be string
-/items/0/qty: 0 should be at least 1`, err.Error())
+/items/0/qty: 0 should be at least 1
+/name: Value is integer but should be string`, err.Error())
 	})
 
 	t.Run("it_reports_references_to_missing_partials_without_example_data", func(t *testing.T) {

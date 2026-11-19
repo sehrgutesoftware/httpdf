@@ -1,6 +1,10 @@
+name: CI
+
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  pull_request:
 
 env:
   REGISTRY: ghcr.io
@@ -11,22 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
           cache: true
 
       - name: Run tests
         run: go test -v ./... -coverprofile=coverage.txt -covermode=atomic
 
   build:
+    # The image is only built and published for version tags
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: test
     runs-on: ubuntu-latest
     permissions:
