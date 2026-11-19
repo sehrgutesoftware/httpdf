@@ -54,6 +54,7 @@ Mount your templates into the container under the `/templates` directory. Each t
     ├── schema.json         # JSON Schema describing the data structure required by the template
     ├── config.yaml         # template config parameters
     ├── example.json        # (optional) example values
+    ├── /partials           # (optional) additional template files
     ├── /assets             # (optional) static assets
     └── /locales/*.yaml     # (optional) translation files
 ```
@@ -83,6 +84,8 @@ exposedEnvVars: # optional; list of env vars available in the template
 ```
 
 `example.json` can be added for testing and documentation purposes, providing some example data to render the template during template development.
+
+`partials/` is an optional directory for splitting complex templates into multiple files. Every `.html` file in it (including subdirectories) is parsed along with `template.html` and can be included by its path relative to `partials/`, e.g. `{{ template "header.html" . }}` or `{{ template "sections/line-items.html" . }}`. Templates declared with `{{ define "name" }}` in a partial are available in all files, and all template functions work in partials. Since all files share one namespace, a later definition of the same name replaces an earlier one. `template.html` is parsed first, followed by the partials in lexical order of their paths. This allows a partial to override a `{{ block }}` in `template.html`.
 
 `assets/` is an optional directory for static assets, such as images or stylesheets. They can be referenced in the HTML template using the `asset` function, e.g. `<link rel="stylesheet" href="{{ asset "style.css" }}">` or `<img src="{{ asset "images" "logo.png" }}">`.
 

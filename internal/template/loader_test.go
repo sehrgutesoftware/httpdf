@@ -114,9 +114,47 @@ locale:
 		assert.Equal(t, 297.0, tmpl.Config.Page.Height)
 		assert.Nil(t, tmpl.Config.Locale)
 		assert.NotNil(t, tmpl.Schema)
+		assert.Nil(t, tmpl.Partials)
 		assert.Nil(t, tmpl.Assets)
 		assert.Nil(t, tmpl.I18n)
 		assert.Nil(t, tmpl.Example)
+	})
+
+	t.Run("it_loads_partials_when_partials_directory_exists", func(t *testing.T) {
+		mockFS := fstest.MapFS{
+			"with-partials/template.html": &fstest.MapFile{
+				Data: []byte(`{{template "header.html" .}}`),
+			},
+			"with-partials/config.yaml": &fstest.MapFile{
+				Data: []byte(`page:
+  width: 210
+  height: 297`),
+			},
+			"with-partials/schema.json": &fstest.MapFile{
+				Data: []byte(`{"type": "object"}`),
+			},
+			"with-partials/partials/header.html": &fstest.MapFile{
+				Data: []byte(`<header>{{.title}}</header>`),
+			},
+			"with-partials/partials/sections/items.html": &fstest.MapFile{
+				Data: []byte(`{{range .items}}<li>{{.}}</li>{{end}}`),
+			},
+			"with-partials/partials/notes.txt": &fstest.MapFile{
+				Data: []byte(`not a partial`),
+			},
+		}
+
+		subFS, err := fs.Sub(mockFS, ".")
+		require.NoError(t, err)
+		loader := template.NewFSLoader(subFS.(fs.SubFS))
+
+		tmpl, err := loader.Load("with-partials")
+
+		assert.NoError(t, err)
+		assert.Equal(t, []template.Partial{
+			{Name: "header.html", Source: `<header>{{.title}}</header>`},
+			{Name: "sections/items.html", Source: `{{range .items}}<li>{{.}}</li>{{end}}`},
+		}, tmpl.Partials)
 	})
 
 	t.Run("it_returns_template_not_found_error_when_template_html_is_missing", func(t *testing.T) {

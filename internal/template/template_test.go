@@ -52,6 +52,105 @@ func TestRender(t *testing.T) {
 		assert.Contains(t, err.Error(), "parse template")
 	})
 
+	t.Run("it_renders_partials_by_name", func(t *testing.T) {
+		tmpl := &template.Template{
+			Partials: []template.Partial{
+				{Name: "header.html", Source: "<h1>{{.title}}</h1>"},
+				{Name: "sections/items.html", Source: "{{range .items}}<li>{{.}}</li>{{end}}"},
+			},
+		}
+		tmpl.WriteString(`{{template "header.html" .}}<ul>{{template "sections/items.html" .}}</ul>`)
+
+		var output bytes.Buffer
+		values := map[string]any{"title": "List", "items": []any{"a", "b"}}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "<h1>List</h1><ul><li>a</li><li>b</li></ul>", output.String())
+	})
+
+	t.Run("it_makes_templates_defined_in_partials_available", func(t *testing.T) {
+		tmpl := &template.Template{
+			Partials: []template.Partial{
+				{Name: "macros.html", Source: `{{define "greeting"}}Hello {{.}}!{{end}}`},
+			},
+		}
+		tmpl.WriteString(`{{template "greeting" .name}}`)
+
+		var output bytes.Buffer
+		values := map[string]any{"name": "World"}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "Hello World!", output.String())
+	})
+
+	t.Run("it_makes_template_functions_available_in_partials", func(t *testing.T) {
+		tmpl := &template.Template{
+			Partials: []template.Partial{
+				{Name: "logo.html", Source: `<img src="{{asset "logo.png"}}">{{.name | upper}}`},
+			},
+		}
+		tmpl.WriteString(`{{template "logo.html" .}}`)
+
+		var output bytes.Buffer
+		values := map[string]any{"name": "acme"}
+
+		err := tmpl.Render(values, "/static", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, `<img src="/static/logo.png">ACME`, output.String())
+	})
+
+	t.Run("it_lets_partials_override_blocks_of_the_main_template", func(t *testing.T) {
+		tmpl := &template.Template{
+			Partials: []template.Partial{
+				{Name: "content.html", Source: `{{define "content"}}custom{{end}}`},
+			},
+		}
+		tmpl.WriteString(`[{{block "content" .}}default{{end}}]`)
+
+		var output bytes.Buffer
+		values := map[string]any{}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "[custom]", output.String())
+	})
+
+	t.Run("it_returns_an_error_if_a_partial_cant_be_parsed", func(t *testing.T) {
+		tmpl := &template.Template{
+			Partials: []template.Partial{
+				{Name: "broken.html", Source: "{{.invalid syntax"},
+			},
+		}
+		tmpl.WriteString("Hello")
+
+		var output bytes.Buffer
+		values := map[string]any{}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "parse partial broken.html")
+	})
+
+	t.Run("it_returns_an_error_if_a_referenced_partial_does_not_exist", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString(`{{template "missing.html" .}}`)
+
+		var output bytes.Buffer
+		values := map[string]any{}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "execute template")
+	})
+
 	t.Run("it_returns_an_error_if_template_execution_fails", func(t *testing.T) {
 		tmpl := &template.Template{}
 		tmpl.WriteString("{{index .items \"badkey\"}}")

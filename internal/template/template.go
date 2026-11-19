@@ -28,14 +28,22 @@ type Config struct {
 	} `yaml:"pdf"`
 }
 
+// Partial is an additional template file that can be included from the main
+// template via its name, i.e. its path relative to the partials directory.
+type Partial struct {
+	Name   string
+	Source string
+}
+
 // Template represents a template
 type Template struct {
 	bytes.Buffer
-	Config  Config
-	Schema  *jsonschema.Schema
-	Assets  fs.FS
-	Example map[string]any
-	I18n    *i18n.I18n
+	Partials []Partial
+	Config   Config
+	Schema   *jsonschema.Schema
+	Assets   fs.FS
+	Example  map[string]any
+	I18n     *i18n.I18n
 }
 
 // Render the template with the given values to the output
@@ -49,6 +57,12 @@ func (t *Template) Render(values map[string]any, assetsPrefix string, locale str
 	parsed, err := renderer.Parse(t.String())
 	if err != nil {
 		return fmt.Errorf("parse template: %w", err)
+	}
+
+	for _, p := range t.Partials {
+		if _, err := parsed.New(p.Name).Parse(p.Source); err != nil {
+			return fmt.Errorf("parse partial %s: %w", p.Name, err)
+		}
 	}
 
 	err = parsed.Execute(out, values)

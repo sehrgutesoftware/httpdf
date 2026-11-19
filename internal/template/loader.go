@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"strings"
 
 	"github.com/kaptinlin/go-i18n"
 	"github.com/kaptinlin/jsonschema"
@@ -31,6 +32,7 @@ type Loader interface {
 // - dir/template.html: The actual template file
 // - dir/config.yaml: The configuration file
 // - dir/schema.json: The JSON schema file
+// - dir/partials/**/*.html: (optional) additional template files
 // - dir/assets: (optional) directory containing static assets
 // - dir/locales/{locale}.yaml: (optional) translation files
 type fsLoader struct {
@@ -51,6 +53,7 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	contentPath := path.Join(name, "template.html")
 	configPath := path.Join(name, "config.yaml")
 	schemaPath := path.Join(name, "schema.json")
+	partialsPath := path.Join(name, "partials")
 	assetsPath := path.Join(name, "assets")
 	examplePath := path.Join(name, "example.json")
 	localesGlob := path.Join(name, "locales", "*.yaml")
@@ -103,6 +106,28 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	}
 	defer fh.Close()
 	tmpl.ReadFrom(fh)
+
+	// Load partials if they exist. WalkDir visits files in lexical order, so
+	// the order in which partials are parsed is deterministic.
+	if stat, err := fs.Stat(l.root, partialsPath); err == nil && stat.IsDir() {
+		err = fs.WalkDir(l.root, partialsPath, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || path.Ext(p) != ".html" {
+				return err
+			}
+			src, err := fs.ReadFile(l.root, p)
+			if err != nil {
+				return err
+			}
+			tmpl.Partials = append(tmpl.Partials, Partial{
+				Name:   strings.TrimPrefix(p, partialsPath+"/"),
+				Source: string(src),
+			})
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("load partials: %w", err)
+		}
+	}
 
 	// Load assets if they exist
 	if stat, err := fs.Stat(l.root, assetsPath); err == nil && stat.IsDir() {
