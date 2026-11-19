@@ -189,32 +189,9 @@ Parameters:
 
 The function returns a complete data URL string in the format `data:image/png;base64,<encoded-data>` that can be used directly as an image source.
 
-## Migration Guide
+## Changelog
 
-### Breaking Changes in v0.7
-The `{{ .__assets__ }}` and `{{ .__locale__ }}` template variables have been replaced with the `asset` and `locale` functions. If you're upgrading from a previous version of httpdf, you may need to update your templates to use the new function-based API:
-
-### Asset references
-```html
-<!-- Old API -->
-<link rel="stylesheet" href="{{ .__assets__ }}/style.css">
-<img src="{{ .__assets__ }}/images/logo.png">
-
-<!-- New API -->
-<link rel="stylesheet" href="{{ asset "style.css" }}">
-<img src="{{ asset "images" "logo.png" }}">
-```
-
-### Locale access
-```html
-<!-- Old API -->
-<p>Current locale: {{ .__locale__ }}</p>
-
-<!-- New API -->
-<p>Current locale: {{ locale }}</p>
-```
-
-The new API provides better flexibility for asset path construction and clearer function semantics. All other template functions remain unchanged.
+Notable changes in each release, including how to migrate across breaking changes, are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 
