@@ -115,7 +115,7 @@ It checks that:
 - `schema.json` is a valid JSON Schema
 - `config.yaml` can be loaded, contains no unknown keys, and the page width and height are greater than 0
 - `template.html` and all partials are free of syntax errors and only use existing functions
-- if `locale` is configured: `locales` isn't empty, contains the `default` locale, and each locale has a translation file
+- if `locale` is configured: `locales` isn't empty, contains the `default` locale, and each locale is a valid language tag with a translation file
 - if there's an `example.json`: it matches the schema and renders without errors
 
 Invalid HTML output or errors in the PDF itself, such as missing assets or broken layouts, **are not** detected (no browser is run during validation).

@@ -8,10 +8,12 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/kaptinlin/go-i18n"
 	"github.com/kaptinlin/jsonschema"
+	"golang.org/x/text/language"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -165,6 +167,10 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 
 	// Load locales if they exist
 	if tmpl.Config.Locale != nil {
+		if !hasUsableLocale(tmpl.Config.Locale.Default, tmpl.Config.Locale.Locales) {
+			return nil, errors.New("invalid config: locale requires a valid locale in locale.default or locale.locales")
+		}
+
 		localeOpts := make([]func(*i18n.I18n), 1, 3)
 		localeOpts[0] = i18n.WithUnmarshaler(yaml.Unmarshal)
 
@@ -216,6 +222,14 @@ func (l *fsLoader) checkConfig(name string, c Config) error {
 	if len(c.Locale.Locales) == 0 {
 		errs = append(errs, errors.New("locale.locales must not be empty"))
 	}
+	for _, locale := range c.Locale.Locales {
+		if !validLocale(locale) {
+			errs = append(errs, fmt.Errorf("locale.locales: %q is not a valid locale", locale))
+		}
+	}
+	if c.Locale.Default != "" && !validLocale(c.Locale.Default) {
+		errs = append(errs, fmt.Errorf("locale.default: %q is not a valid locale", c.Locale.Default))
+	}
 
 	configured := make(map[string]bool, len(c.Locale.Locales))
 	for _, locale := range c.Locale.Locales {
@@ -254,6 +268,20 @@ func describeUnknownKeys(err error) error {
 		}
 	}
 	return err
+}
+
+// hasUsableLocale reports whether go-i18n can determine a default locale from
+// the config, mirroring how it parses the values. Without one, i18n.NewBundle
+// panics.
+func hasUsableLocale(defaultLocale string, locales []string) bool {
+	return language.Make(defaultLocale) != language.Und || slices.ContainsFunc(locales, validLocale)
+}
+
+// validLocale reports whether go-i18n accepts the locale. It silently ignores
+// the ones it doesn't.
+func validLocale(locale string) bool {
+	tag, err := language.Parse(locale)
+	return err == nil && tag != language.Und
 }
 
 // normalizeLocale mirrors how go-i18n derives the locale from the name of a

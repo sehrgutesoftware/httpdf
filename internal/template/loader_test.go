@@ -491,6 +491,56 @@ pdf:
 		assert.ErrorContains(t, err, `line 5: unknown key "generateTaggedPdf"`)
 	})
 
+	t.Run("it_returns_an_error_instead_of_panicking_when_no_locale_is_usable", func(t *testing.T) {
+		cases := map[string]string{
+			"empty_locale_config":  `locale: {}`,
+			"invalid_locales_only": `locale: {locales: [xx, "not a locale"]}`,
+			"invalid_default_only": `locale: {default: garbage}`,
+		}
+
+		for name, localeConfig := range cases {
+			t.Run(name, func(t *testing.T) {
+				config := "page: {width: 210, height: 297}\n" + localeConfig
+
+				for _, opts := range [][]template.LoaderOption{nil, {template.WithStrict()}} {
+					var tmpl *template.Template
+					var err error
+					require.NotPanics(t, func() {
+						tmpl, err = load(t, config, []string{"xx"}, opts...)
+					})
+
+					assert.Nil(t, tmpl)
+					assert.ErrorContains(t, err, "invalid config")
+				}
+			})
+		}
+	})
+
+	t.Run("it_ignores_invalid_locales_when_not_strict_if_another_one_is_usable", func(t *testing.T) {
+		config := `page: {width: 210, height: 297}
+locale:
+  locales: [xx, en]
+  default: "!!"`
+
+		tmpl, err := load(t, config, []string{"en", "xx"})
+
+		assert.NoError(t, err)
+		assert.NotNil(t, tmpl.I18n)
+	})
+
+	t.Run("it_rejects_invalid_locales", func(t *testing.T) {
+		config := `page: {width: 210, height: 297}
+locale:
+  locales: [de, xx]
+  default: "!!"`
+
+		tmpl, err := load(t, config, []string{"de", "xx"}, template.WithStrict())
+
+		assert.Nil(t, tmpl)
+		assert.ErrorContains(t, err, `locale.locales: "xx" is not a valid locale`)
+		assert.ErrorContains(t, err, `locale.default: "!!" is not a valid locale`)
+	})
+
 	t.Run("it_ignores_unknown_config_keys_when_not_strict", func(t *testing.T) {
 		config := `page:
   width: 210
