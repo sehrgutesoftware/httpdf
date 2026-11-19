@@ -129,7 +129,7 @@ The server runs the same validation on startup and logs a warning for each inval
 ##### Base Functions
 
 - All [Go template functions](https://pkg.go.dev/text/template#hdr-Functions) for basic operations
-- All [Sprig](https://masterminds.github.io/sprig/) functions for general template operations
+- All [Sprig](https://masterminds.github.io/sprig/) functions for general template operations, except `expandenv` and `getHostByName`. Sprig's `env` is replaced by a restricted version, see below.
 - `asset`: Generate asset URLs with the configured assets prefix. Usage: `{{ asset "style.css" }}` or `{{ asset "images" "logo.png" }}`
 - `chunk`: Takes an array and returns an array of arrays with n elements each. Usage: `{{ chunk .items 2 }}`
 - `safeHTML`, `safeURL`, `safeCSS`: Mark a value as trusted HTML, URL or CSS, so it's inserted without escaping. Never use them on values you don't trust, such as request data entered by end users. Usage: `{{ tr "terms" | safeHTML }}` or `<img src="{{ .logo | safeURL }}">`

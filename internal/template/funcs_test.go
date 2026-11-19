@@ -255,9 +255,9 @@ func TestTemplateFuncsIntegration(t *testing.T) {
 	assert.NotNil(t, funcs["chunk"])
 	assert.NotNil(t, funcs["asset"])
 
-	// Note: sprig includes an env function by default, but our custom env function
-	// is added separately by envTemplateFuncs to provide security controls
-	assert.NotNil(t, funcs["env"]) // sprig's env function
+	// Sprig's unrestricted env function is removed; our custom env function is
+	// added separately by envTemplateFuncs to provide security controls
+	assert.Nil(t, funcs["env"])
 
 	// Check that i18n functions are not included by default
 	assert.Nil(t, funcs["tr"])
@@ -389,10 +389,9 @@ func TestEnvFunctionOverride(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Unsetenv("TEST_OVERRIDE")
 
-	// Test sprig's env function (unrestricted access)
+	// Sprig's env function (unrestricted access) is removed
 	sprigFuncs := templateFuncs("")
-	sprigEnvFunc := sprigFuncs["env"].(func(string) string)
-	assert.Equal(t, "secret_value", sprigEnvFunc("TEST_OVERRIDE"))
+	assert.NotContains(t, sprigFuncs, "env")
 
 	// Test our custom env function (restricted access)
 	customFuncs := templateFuncs("")
@@ -405,6 +404,15 @@ func TestEnvFunctionOverride(t *testing.T) {
 	envTemplateFuncs(allowedFuncs, []string{"TEST_OVERRIDE"})
 	allowedEnvFunc := allowedFuncs["env"].(func(string) string)
 	assert.Equal(t, "secret_value", allowedEnvFunc("TEST_OVERRIDE")) // Should be allowed
+}
+
+func TestUnsafeSprigFuncsAreRemoved(t *testing.T) {
+	funcs := templateFuncs("")
+
+	for _, name := range []string{"env", "expandenv", "getHostByName"} {
+		assert.NotContains(t, funcs, name)
+	}
+	assert.Contains(t, funcs, "upper", "other Sprig functions should remain")
 }
 func TestQrCodeFunc(t *testing.T) {
 	tests := []struct {

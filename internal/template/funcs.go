@@ -7,8 +7,16 @@ import (
 	"github.com/Masterminds/sprig/v3"
 )
 
+// unsafeSprigFuncs are removed from the template functions: env and expandenv
+// can read any environment variable (env is replaced by a restricted version,
+// see envTemplateFuncs), and getHostByName performs DNS lookups.
+var unsafeSprigFuncs = []string{"env", "expandenv", "getHostByName"}
+
 func templateFuncs(assetsPrefix string) template.FuncMap {
 	funcs := sprig.FuncMap()
+	for _, name := range unsafeSprigFuncs {
+		delete(funcs, name)
+	}
 	funcs["chunk"] = chunk
 	funcs["asset"] = assetsFunc(assetsPrefix)
 	safeTemplateFuncs(funcs)

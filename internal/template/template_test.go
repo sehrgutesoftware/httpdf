@@ -354,6 +354,27 @@ func TestRender(t *testing.T) {
 		assert.Equal(t, "Exposed: secret_value, Hidden: , Missing: ", output.String())
 	})
 
+	t.Run("it_doesnt_provide_sprigs_unrestricted_env_functions", func(t *testing.T) {
+		t.Setenv("HIDDEN_VAR", "hidden_secret")
+
+		for _, call := range []string{`{{expandenv "$HIDDEN_VAR"}}`, `{{getHostByName "localhost"}}`} {
+			tmpl := &template.Template{}
+			tmpl.WriteString(call)
+
+			var output bytes.Buffer
+			err := tmpl.Render(map[string]any{}, "/assets", "en", &output)
+
+			assert.ErrorContains(t, err, "not defined")
+			assert.Empty(t, output.String())
+		}
+
+		tmpl := &template.Template{}
+		tmpl.WriteString(`{{env "HIDDEN_VAR"}}`)
+		var output bytes.Buffer
+		require.NoError(t, tmpl.Render(map[string]any{}, "/assets", "en", &output))
+		assert.Empty(t, output.String())
+	})
+
 	t.Run("it_handles_env_function_with_empty_exposed_list", func(t *testing.T) {
 		err := os.Setenv("ANY_VAR", "any_value")
 		require.NoError(t, err)

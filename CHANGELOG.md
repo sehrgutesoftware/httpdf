@@ -21,9 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `httpdf-server validate` helps with the migration: it reports values replaced with `ZgotmplZ` when rendering the example data, and template actions in ambiguous contexts, e.g. inside an unclosed attribute.
 
+### Removed
+
+- **Breaking:** The Sprig functions `expandenv` and `getHostByName`. Use `env` with `exposedEnvVars` instead of `expandenv`.
+
 ### Security
 
 - Request data is escaped. Before, it was inserted into the HTML verbatim, so anyone who controlled a value could inject markup and scripts into the page Chromium renders, e.g. to load internal URLs into the PDF.
+- Templates can no longer read environment variables that aren't listed in `exposedEnvVars`, which was possible via Sprig's `expandenv`, or make DNS lookups via `getHostByName`.
 
 ## [0.10.1] - 2026-11-19
 
