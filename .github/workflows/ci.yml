@@ -26,6 +26,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Check that the Dockerfile uses the Go version from go.mod
+        run: |
+          gomod=$(go mod edit -json | jq -r .Go)
+          dockerfile=$(sed -n 's/^ARG GOLANG_VERSION=//p' Dockerfile)
+          if [ "$gomod" != "$dockerfile" ]; then
+            echo "::error file=Dockerfile::GOLANG_VERSION is $dockerfile, but go.mod requires $gomod"
+            exit 1
+          fi
+
       - name: Run tests
         run: go test -v ./... -coverprofile=coverage.txt -covermode=atomic
 
