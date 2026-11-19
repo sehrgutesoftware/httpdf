@@ -2,6 +2,7 @@ package pdf
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ type RenderOpts struct {
 	GenerateTaggedPDF bool
 	// GenerateDocumentOutline indicates whether to generate a document outline,
 	// see https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-printToPDF
+	// Chromium derives the outline from the tags, so it implies GenerateTaggedPDF.
 	GenerateDocumentOutline bool
 }
 
@@ -88,7 +90,7 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	}
 
 	// Launch a new browser with default options
-	l, err := launcher.New().
+	l := launcher.New().
 		Context(ctx).
 		Bin(r.chromium).
 		Logger(browserLog).
@@ -100,20 +102,21 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 		Set("disable-dev-shm-usage").
 		Set("disable-software-rasterizer").
 		Set("no-sandbox").
-		Set("no-zygote").
-		Launch()
+		Set("no-zygote")
+	controlURL, err := l.Launch()
 	if err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
 	}
 	launched := time.Now()
 
 	// Connect to the browser
-	browser := rod.New().Context(ctx).ControlURL(l)
-	defer browser.Close()
+	browser := rod.New().Context(ctx).ControlURL(controlURL)
 	err = browser.Connect()
 	if err != nil {
+		r.stopBrowser(ctx, l, nil)
 		return fmt.Errorf("failed to connect to browser: %w", err)
 	}
+	defer r.stopBrowser(ctx, l, browser)
 
 	// Load the HTML content into a new page
 	page, err := browser.Page(proto.TargetCreateTarget{
@@ -132,7 +135,7 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	width := dumbify(opts.Width)
 	height := dumbify(opts.Height)
 	margin := 0.0
-	pdfStream, err := page.PDF(&proto.PagePrintToPDF{
+	pdfStream, err := printToPDF(page, proto.PagePrintToPDF{
 		PrintBackground:         true,
 		PaperWidth:              &width,
 		PaperHeight:             &height,
@@ -142,7 +145,7 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 		MarginRight:             &margin,
 		PreferCSSPageSize:       true,
 		TransferMode:            proto.PagePrintToPDFTransferModeReturnAsStream,
-		GenerateTaggedPDF:       opts.GenerateTaggedPDF,
+		GenerateTaggedPDF:       opts.GenerateTaggedPDF || opts.GenerateDocumentOutline,
 		GenerateDocumentOutline: opts.GenerateDocumentOutline,
 	})
 	if err != nil {
@@ -177,6 +180,69 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	)
 
 	return nil
+}
+
+// browserExitTimeout is how long the browser may take to close or exit before
+// it's killed
+const browserExitTimeout = 5 * time.Second
+
+// stopBrowser closes the browser, or kills it if it's not connected or can't
+// be closed. Then it waits until the browser has exited and removes its
+// profile directory, which would otherwise remain in the temp directory. The
+// render's context may be done already, e.g. because the client went away, so
+// the browser is closed with a context of its own.
+func (r *rodRenderer) stopBrowser(ctx context.Context, l *launcher.Launcher, browser *rod.Browser) {
+	if browser == nil {
+		l.Kill()
+	} else {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), browserExitTimeout)
+		defer cancel()
+		if err := browser.Context(closeCtx).Close(); err != nil {
+			r.logger.WarnContext(ctx, "closing the browser failed, killing it", "error", err)
+			l.Kill()
+		}
+	}
+
+	// Cleanup waits until the browser has exited
+	cleanedUp := make(chan struct{})
+	go func() {
+		l.Cleanup()
+		close(cleanedUp)
+	}()
+	select {
+	case <-cleanedUp:
+	case <-time.After(browserExitTimeout):
+		r.logger.WarnContext(ctx, "browser didn't exit, killing it")
+		l.Kill()
+		<-cleanedUp
+	}
+}
+
+// printToPDF is like rod's Page.PDF, but always passes the tagged PDF and
+// document outline options to Chromium. rod omits them when they're false,
+// which leaves the choice to Chromium, and Chromium tags PDFs by default.
+func printToPDF(page *rod.Page, req proto.PagePrintToPDF) (*rod.StreamReader, error) {
+	raw, err := page.Call(page.GetContext(), string(page.GetSessionID()), req.ProtoReq(), printToPDFParams(req))
+	if err != nil {
+		return nil, err
+	}
+
+	var res proto.PagePrintToPDFResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decode Page.printToPDF result: %w", err)
+	}
+	return rod.NewStreamReader(page, res.Stream), nil
+}
+
+// printToPDFParams returns the parameters of a Page.printToPDF call. The
+// fields declared here take precedence over the embedded ones with the same
+// JSON names, but aren't omitted when false.
+func printToPDFParams(req proto.PagePrintToPDF) any {
+	return struct {
+		proto.PagePrintToPDF
+		GenerateTaggedPDF       bool `json:"generateTaggedPDF"`
+		GenerateDocumentOutline bool `json:"generateDocumentOutline"`
+	}{req, req.GenerateTaggedPDF, req.GenerateDocumentOutline}
 }
 
 // dumbify strips all reason off a distance measure

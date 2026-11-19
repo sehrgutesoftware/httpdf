@@ -83,7 +83,13 @@ locale: # optional
 exposedEnvVars: # optional; list of env vars available in the template
     - IMAGE_PROXY_URL
     - LANG
+
+pdf: # optional
+    generateTaggedPDF: true # tag the PDF's structure for screen readers and other assistive technology
+    generateDocumentOutline: true # add an outline (bookmarks) based on the HTML headings
 ```
+
+Both `pdf` options default to `false`. Chromium derives the outline from the tags, so `generateDocumentOutline` implies `generateTaggedPDF`.
 
 `example.json` can be added for testing and documentation purposes, providing some example data to render the template during template development.
 

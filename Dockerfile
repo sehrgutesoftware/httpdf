@@ -19,11 +19,11 @@ RUN go mod download
 FROM vendor AS hot-reload
 
 RUN mkdir /build
-ENTRYPOINT [ "CompileDaemon" ]
+ENTRYPOINT [ "/sbin/tini", "--", "CompileDaemon" ]
 CMD ["-build", "go build -o /build/server ./cmd/server", "-command", "/build/server", "-log-prefix", "false"]
 
 # Install runtime dependencies (same as the production image below)
-RUN apk add --no-cache chromium-headless-shell \
+RUN apk add --no-cache chromium-headless-shell tini \
  && apk info -qL mesa mesa-dri-gallium $(apk info -q | grep -E '^llvm[0-9]+-libs$') \
     | grep . | sed 's|^|/|' | xargs rm -f
 
@@ -51,10 +51,10 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION#v}" -o /bui
 # +-----------------------------------------------------------------------------
 FROM alpine:${ALPINE_VERSION}
 
-# Install Chromium's headless shell. GPU rendering is disabled (see
-# internal/pdf/renderer.go), so Mesa's gallium driver and LLVM are never loaded
-# and can be removed (~200 MB).
-RUN apk add --no-cache chromium-headless-shell \
+# Install Chromium's headless shell, and tini (see ENTRYPOINT). GPU rendering is
+# disabled (see internal/pdf/renderer.go), so Mesa's gallium driver and LLVM are
+# never loaded and can be removed (~200 MB).
+RUN apk add --no-cache chromium-headless-shell tini \
  && apk info -qL mesa mesa-dri-gallium $(apk info -q | grep -E '^llvm[0-9]+-libs$') \
     | grep . | sed 's|^|/|' | xargs rm -f
 
@@ -66,5 +66,7 @@ USER appuser
 # Copy the compiled binaries from the builder image
 COPY --from=builder --chown=appuser /build/* /usr/local/bin/
 
-# If launched without setting an explicit entrypoint, we'll run the web server
-ENTRYPOINT [ "httpdf-server" ]
+# If launched without setting an explicit entrypoint, we'll run the web server.
+# tini runs as PID 1 and reaps the processes Chromium leaves behind, which would
+# otherwise pile up as zombies, because httpdf doesn't reap orphaned processes.
+ENTRYPOINT [ "/sbin/tini", "--", "httpdf-server" ]

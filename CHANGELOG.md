@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `chunk` with a size of 0 looped forever, until the server ran out of memory. It now fails for sizes below 1.
 - `chunk` failed for sizes from the request data, which are JSON numbers, and for lists other than JSON arrays, e.g. from Sprig's `splitList`.
+- **Breaking:** `generateTaggedPDF: false` had no effect, because Chromium tags PDFs by default. Templates without the option now produce untagged PDFs. Set `generateTaggedPDF: true` to keep them tagged.
+- Each render left a zombie process behind, which piled up until the container was restarted, because httpdf runs as PID 1 and doesn't reap orphaned processes. The image now runs httpdf through [tini](https://github.com/krallin/tini). If you override the entrypoint, e.g. with Kubernetes' `command`, keep `/sbin/tini --` in front of `httpdf-server`.
+- Each render left its browser profile of about 1 MB in the container's temp directory.
 
 ### Security
 
