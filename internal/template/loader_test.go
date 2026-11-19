@@ -440,3 +440,110 @@ locale:
 		assert.Equal(t, true, tmpl.Example["enabled"])
 	})
 }
+
+func TestFSLoader_LoadStrict(t *testing.T) {
+	// load loads a template consisting of the given config and translation
+	// files, plus a minimal template.html and schema.json
+	load := func(t *testing.T, config string, locales []string, opts ...template.LoaderOption) (*template.Template, error) {
+		t.Helper()
+		mockFS := fstest.MapFS{
+			"tpl/template.html": &fstest.MapFile{Data: []byte(`Hello`)},
+			"tpl/schema.json":   &fstest.MapFile{Data: []byte(`{"type": "object"}`)},
+			"tpl/config.yaml":   &fstest.MapFile{Data: []byte(config)},
+		}
+		for _, locale := range locales {
+			mockFS["tpl/locales/"+locale+".yaml"] = &fstest.MapFile{Data: []byte(`hello: Hello`)}
+		}
+
+		subFS, err := fs.Sub(mockFS, ".")
+		require.NoError(t, err)
+		return template.NewFSLoader(subFS.(fs.SubFS), opts...).Load("tpl")
+	}
+
+	t.Run("it_loads_a_valid_template", func(t *testing.T) {
+		config := `page:
+  width: 210
+  height: 297
+locale:
+  locales: [de, en_US]
+  default: en-us
+pdf:
+  generateTaggedPDF: true`
+
+		tmpl, err := load(t, config, []string{"de", "en-US"}, template.WithStrict())
+
+		assert.NoError(t, err)
+		assert.NotNil(t, tmpl)
+	})
+
+	t.Run("it_rejects_unknown_config_keys", func(t *testing.T) {
+		config := `page:
+  width: 210
+  heigth: 297
+pdf:
+  generateTaggedPdf: true`
+
+		tmpl, err := load(t, config, nil, template.WithStrict())
+
+		assert.Nil(t, tmpl)
+		assert.ErrorContains(t, err, "decode config file")
+		assert.ErrorContains(t, err, `line 3: unknown key "heigth"`)
+		assert.ErrorContains(t, err, `line 5: unknown key "generateTaggedPdf"`)
+	})
+
+	t.Run("it_ignores_unknown_config_keys_when_not_strict", func(t *testing.T) {
+		config := `page:
+  width: 210
+  height: 297
+unknown: true`
+
+		tmpl, err := load(t, config, nil)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, tmpl)
+	})
+
+	t.Run("it_rejects_missing_page_dimensions", func(t *testing.T) {
+		tmpl, err := load(t, `page: {width: 0}`, nil, template.WithStrict())
+
+		assert.Nil(t, tmpl)
+		assert.ErrorContains(t, err, "invalid config")
+		assert.ErrorContains(t, err, "page.width must be greater than 0")
+		assert.ErrorContains(t, err, "page.height must be greater than 0")
+	})
+
+	t.Run("it_rejects_an_empty_list_of_locales", func(t *testing.T) {
+		config := `page: {width: 210, height: 297}
+locale:
+  default: en`
+
+		tmpl, err := load(t, config, []string{"en"}, template.WithStrict())
+
+		assert.Nil(t, tmpl)
+		assert.ErrorContains(t, err, "locale.locales must not be empty")
+	})
+
+	t.Run("it_rejects_a_default_locale_thats_not_in_the_list", func(t *testing.T) {
+		config := `page: {width: 210, height: 297}
+locale:
+  locales: [de, en]
+  default: fr`
+
+		tmpl, err := load(t, config, []string{"de", "en", "fr"}, template.WithStrict())
+
+		assert.Nil(t, tmpl)
+		assert.ErrorContains(t, err, `locale.default "fr" must be one of locale.locales`)
+	})
+
+	t.Run("it_rejects_locales_without_a_translation_file", func(t *testing.T) {
+		config := `page: {width: 210, height: 297}
+locale:
+  locales: [de, en, fr]`
+
+		tmpl, err := load(t, config, []string{"de"}, template.WithStrict())
+
+		assert.Nil(t, tmpl)
+		assert.ErrorContains(t, err, `missing translation file locales/en.yaml for locale "en"`)
+		assert.ErrorContains(t, err, `missing translation file locales/fr.yaml for locale "fr"`)
+	})
+}

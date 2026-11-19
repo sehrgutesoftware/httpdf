@@ -93,6 +93,32 @@ exposedEnvVars: # optional; list of env vars available in the template
 
 Only translation files for the languages defined in the `config.yaml` file will be loaded.
 
+#### Template Validation
+
+In order to check templates for config or syntax errors, user `httpdf-server validate`. It exits with a non-zero status if any template is invalid. Without arguments, it validates all templates. `httpdf-server validate invoice label` validates only the named ones. This is useful as a build step in CI, when adding templates as a docker layer:
+
+```dockerfile
+FROM ghcr.io/sehrgutesoftware/httpdf
+COPY templates/ /templates/
+RUN httpdf-server validate
+```
+
+Or as a stand-alone run:
+
+```sh
+docker run --rm -v ./templates:/templates ghcr.io/sehrgutesoftware/httpdf validate
+```
+
+It checks that:
+
+- all required files exist and can be read
+- `schema.json` is a valid JSON Schema
+- `config.yaml` can be loaded, contains no unknown keys, and the page width and height are greater than 0
+- `template.html` and all partials are free of syntax errors and only use existing functions
+- if `locale` is configured: `locales` isn't empty, contains the `default` locale, and each locale has a translation file
+- if there's an `example.json`: it matches the schema and renders without errors
+
+Invalid HTML output or errors in the PDF itself, such as missing assets or broken layouts, **are not** detected (no browser is run during validation).
 
 #### Template Functions
 

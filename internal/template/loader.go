@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/kaptinlin/go-i18n"
@@ -38,14 +39,32 @@ type Loader interface {
 type fsLoader struct {
 	root   fs.SubFS
 	schema *jsonschema.Compiler
+	strict bool
+}
+
+// LoaderOption configures a Loader
+type LoaderOption func(*fsLoader)
+
+// WithStrict makes the loader reject templates with unknown keys in
+// config.yaml, missing page dimensions or an incomplete locale configuration.
+func WithStrict() LoaderOption {
+	return func(l *fsLoader) {
+		l.strict = true
+	}
 }
 
 // NewFSLoader creates a new fsLoader
-func NewFSLoader(root fs.SubFS) Loader {
-	return &fsLoader{
+func NewFSLoader(root fs.SubFS, opts ...LoaderOption) Loader {
+	l := &fsLoader{
 		root:   root,
 		schema: jsonschema.NewCompiler(),
 	}
+
+	for _, opt := range opts {
+		opt(l)
+	}
+
+	return l
 }
 
 // Load loads a template from the filesystem
@@ -79,9 +98,16 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 		return nil, fmt.Errorf("open config file: %w", err)
 	}
 	defer configFile.Close()
-	err = yaml.NewDecoder(configFile).Decode(&tmpl.Config)
+	configDecoder := yaml.NewDecoder(configFile)
+	configDecoder.KnownFields(l.strict)
+	err = configDecoder.Decode(&tmpl.Config)
 	if err != nil {
-		return nil, fmt.Errorf("decode config file: %w", err)
+		return nil, fmt.Errorf("decode config file: %w", describeUnknownKeys(err))
+	}
+	if l.strict {
+		if err := l.checkConfig(name, tmpl.Config); err != nil {
+			return nil, fmt.Errorf("invalid config: %w", err)
+		}
 	}
 
 	// Load the JSON schema
@@ -169,4 +195,70 @@ func (l *fsLoader) Load(name string) (*Template, error) {
 	}
 
 	return tmpl, nil
+}
+
+// checkConfig reports config values that are syntactically valid, but would
+// lead to broken PDFs or missing translations.
+func (l *fsLoader) checkConfig(name string, c Config) error {
+	var errs []error
+
+	if c.Page.Width <= 0 {
+		errs = append(errs, errors.New("page.width must be greater than 0"))
+	}
+	if c.Page.Height <= 0 {
+		errs = append(errs, errors.New("page.height must be greater than 0"))
+	}
+
+	if c.Locale == nil {
+		return errors.Join(errs...)
+	}
+
+	if len(c.Locale.Locales) == 0 {
+		errs = append(errs, errors.New("locale.locales must not be empty"))
+	}
+
+	configured := make(map[string]bool, len(c.Locale.Locales))
+	for _, locale := range c.Locale.Locales {
+		configured[normalizeLocale(locale)] = true
+	}
+	if c.Locale.Default != "" && len(c.Locale.Locales) > 0 && !configured[normalizeLocale(c.Locale.Default)] {
+		errs = append(errs, fmt.Errorf("locale.default %q must be one of locale.locales", c.Locale.Default))
+	}
+
+	files, err := fs.Glob(l.root, path.Join(name, "locales", "*.yaml"))
+	if err != nil {
+		return fmt.Errorf("list translation files: %w", err)
+	}
+	available := make(map[string]bool, len(files))
+	for _, file := range files {
+		available[normalizeLocale(file)] = true
+	}
+	for _, locale := range c.Locale.Locales {
+		if !available[normalizeLocale(locale)] {
+			errs = append(errs, fmt.Errorf("missing translation file locales/%s.yaml for locale %q", locale, locale))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+var unknownKeyPattern = regexp.MustCompile(`^(line \d+): field (\S+) not found in type .*$`)
+
+// describeUnknownKeys rewrites yaml's errors about unknown keys, which include
+// the Go type definitions of the config, into ones meant for template authors.
+func describeUnknownKeys(err error) error {
+	var typeErr *yaml.TypeError
+	if errors.As(err, &typeErr) {
+		for i, msg := range typeErr.Errors {
+			typeErr.Errors[i] = unknownKeyPattern.ReplaceAllString(msg, `$1: unknown key "$2"`)
+		}
+	}
+	return err
+}
+
+// normalizeLocale mirrors how go-i18n derives the locale from the name of a
+// translation file, so that config values and file names can be compared.
+func normalizeLocale(s string) string {
+	s, _, _ = strings.Cut(path.Base(s), ".")
+	return strings.ReplaceAll(strings.ToLower(s), "_", "-")
 }

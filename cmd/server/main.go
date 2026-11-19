@@ -35,6 +35,10 @@ const (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "validate" {
+		os.Exit(validate(os.Stdout, templatesDir, os.Args[2:]))
+	}
+
 	logFormat, errLogFormat := envLogFormat("HTTPDF_LOG_FORMAT")
 	logLevel, errLogLevel := envLogLevel("HTTPDF_LOG_LEVEL")
 

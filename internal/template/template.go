@@ -48,21 +48,9 @@ type Template struct {
 
 // Render the template with the given values to the output
 func (t *Template) Render(values map[string]any, assetsPrefix string, locale string, out io.Writer) error {
-	funcs := templateFuncs(assetsPrefix)
-	i18nTemplateFuncs(funcs, t.I18n, locale)
-	envTemplateFuncs(funcs, t.Config.ExposedEnvVars)
-	barcodeTemplateFuncs(funcs)
-
-	renderer := template.New("main").Funcs(funcs)
-	parsed, err := renderer.Parse(t.String())
+	parsed, err := t.parse(assetsPrefix, locale)
 	if err != nil {
-		return fmt.Errorf("parse template: %w", err)
-	}
-
-	for _, p := range t.Partials {
-		if _, err := parsed.New(p.Name).Parse(p.Source); err != nil {
-			return fmt.Errorf("parse partial %s: %w", p.Name, err)
-		}
+		return err
 	}
 
 	err = parsed.Execute(out, values)
@@ -71,4 +59,25 @@ func (t *Template) Render(values map[string]any, assetsPrefix string, locale str
 	}
 
 	return nil
+}
+
+// parse the template and its partials into a single template set
+func (t *Template) parse(assetsPrefix string, locale string) (*template.Template, error) {
+	funcs := templateFuncs(assetsPrefix)
+	i18nTemplateFuncs(funcs, t.I18n, locale)
+	envTemplateFuncs(funcs, t.Config.ExposedEnvVars)
+	barcodeTemplateFuncs(funcs)
+
+	parsed, err := template.New("template.html").Funcs(funcs).Parse(t.String())
+	if err != nil {
+		return nil, fmt.Errorf("parse template: %w", err)
+	}
+
+	for _, p := range t.Partials {
+		if _, err := parsed.New(p.Name).Parse(p.Source); err != nil {
+			return nil, fmt.Errorf("parse partial %s: %w", p.Name, err)
+		}
+	}
+
+	return parsed, nil
 }
