@@ -95,7 +95,7 @@ Only translation files for the languages defined in the `config.yaml` file will 
 
 #### Template Validation
 
-In order to check templates for config or syntax errors, user `httpdf-server validate`. It exits with a non-zero status if any template is invalid. Without arguments, it validates all templates. `httpdf-server validate invoice label` validates only the named ones. This is useful as a build step in CI, when adding templates as a docker layer:
+In order to check templates for config or syntax errors, use `httpdf-server validate`. It exits with a non-zero status if any template is invalid. Without arguments, it validates all templates. `httpdf-server validate invoice label` validates only the named ones. This is useful as a build step in CI, when adding templates as a docker layer:
 
 ```dockerfile
 FROM ghcr.io/sehrgutesoftware/httpdf
