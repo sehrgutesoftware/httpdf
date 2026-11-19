@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** The Sprig functions `expandenv` and `getHostByName`. Use `env` with `exposedEnvVars` instead of `expandenv`.
 
+### Fixed
+
+- `chunk` with a size of 0 looped forever, until the server ran out of memory. It now fails for sizes below 1.
+- `chunk` failed for sizes from the request data, which are JSON numbers, and for lists other than JSON arrays, e.g. from Sprig's `splitList`.
+
 ### Security
 
 - Request data is escaped. Before, it was inserted into the HTML verbatim, so anyone who controlled a value could inject markup and scripts into the page Chromium renders, e.g. to load internal URLs into the PDF.

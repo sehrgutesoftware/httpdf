@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,8 +126,8 @@ NonExistent: {{env "NON_EXISTENT_VAR"}}
 func TestChunk(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    []any
-		size     int
+		input    any
+		size     any
 		expected [][]any
 	}{
 		{
@@ -153,11 +154,36 @@ func TestChunk(t *testing.T) {
 			size:     2,
 			expected: [][]any{},
 		},
+		{
+			name:     "size from JSON",
+			input:    []any{1, 2, 3},
+			size:     2.0,
+			expected: [][]any{{1, 2}, {3}},
+		},
+		{
+			name:     "size of another integer type",
+			input:    []any{1, 2, 3},
+			size:     uint8(2),
+			expected: [][]any{{1, 2}, {3}},
+		},
+		{
+			name:     "list of another type",
+			input:    []string{"a", "b", "c"},
+			size:     2,
+			expected: [][]any{{"a", "b"}, {"c"}},
+		},
+		{
+			name:     "nil list",
+			input:    nil,
+			size:     2,
+			expected: [][]any{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := chunk(tt.input, tt.size)
+			result, err := chunk(tt.input, tt.size)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -165,11 +191,46 @@ func TestChunk(t *testing.T) {
 
 func TestChunkInvalidArgs(t *testing.T) {
 	// Test with less than 2 arguments
-	result := chunk([]any{1, 2, 3})
+	result, err := chunk([]any{1, 2, 3})
+	assert.NoError(t, err)
 	assert.Nil(t, result)
 
-	result = chunk()
+	result, err = chunk()
+	assert.NoError(t, err)
 	assert.Nil(t, result)
+
+	tests := []struct {
+		name  string
+		input any
+		size  any
+		err   string
+	}{
+		{name: "zero size", input: []any{1}, size: 0, err: "chunk: size must be greater than 0, got 0"},
+		{name: "negative size", input: []any{1}, size: -1, err: "chunk: size must be greater than 0, got -1"},
+		{name: "fractional size", input: []any{1}, size: 2.5, err: "chunk: size: expected an integer, got 2.5"},
+		{name: "size out of range", input: []any{1}, size: 1e300, err: "chunk: size: expected an integer, got 1e+300"},
+		{name: "non-numeric size", input: []any{1}, size: "2", err: "chunk: size: expected an integer, got string"},
+		{name: "non-list input", input: "abc", size: 2, err: "chunk: expected a list, got string"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// A size of 0 used to loop forever, so a regression must fail
+			// instead of hanging the test
+			done := make(chan error, 1)
+			go func() {
+				_, err := chunk(tt.input, tt.size)
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				assert.EqualError(t, err, tt.err)
+			case <-time.After(time.Second):
+				t.Fatal("chunk didn't return")
+			}
+		})
+	}
 }
 
 func TestAssetFunc(t *testing.T) {

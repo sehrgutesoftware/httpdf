@@ -227,6 +227,34 @@ func TestRender(t *testing.T) {
 		assert.Equal(t, "2 2 1 ", output.String())
 	})
 
+	t.Run("it_uses_a_chunk_size_from_the_request_data", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString("{{range chunk .items .columns}}{{len .}} {{end}}")
+
+		var output bytes.Buffer
+		values := map[string]any{
+			"items":   []any{"a", "b", "c", "d", "e"},
+			"columns": 2.0, // JSON numbers are float64
+		}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "2 2 1 ", output.String())
+	})
+
+	t.Run("it_returns_an_error_for_a_chunk_size_of_0", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString("{{range chunk .items .columns}}{{len .}} {{end}}")
+
+		var output bytes.Buffer
+		values := map[string]any{"items": []any{"a"}, "columns": 0.0}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.ErrorContains(t, err, "chunk: size must be greater than 0, got 0")
+	})
+
 	t.Run("it_handles_templates_without_i18n", func(t *testing.T) {
 		tmpl := &template.Template{
 			I18n: nil,
