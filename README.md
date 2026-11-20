@@ -19,13 +19,34 @@ The web service can be run as a simple go binary or as a [docker image](https://
 
 ### Configuration
 
-| Environment Variable | Default | Description |
-| -------------------- | ------- | ----------- |
-| `HTTPDF_LOG_FORMAT`  | `json`  | Log format written to stdout: `json` or `text`. |
-| `HTTPDF_LOG_LEVEL`   | `info`  | Minimum log level: `trace`, `debug`, `info`, `warn` or `error`. `trace` includes Chromium's output, which is useful for debugging the browser. |
-| `HTTPDF_MAX_REQUEST_MB` | `10` | Maximum size of a render request's body in megabytes. Larger requests are rejected with `413`. |
-| `HTTPDF_MAX_CONCURRENT_RENDERS` | number of CPUs | Maximum number of PDFs rendered at the same time. Further requests wait for a free slot. |
-| `HTTPDF_RENDER_TIMEOUT` | `20s` | Maximum duration of a render, including the time spent waiting for a free slot, e.g. `20s` or `1m`. Keep it below 25 seconds, the time in-flight requests get to complete on shutdown. |
+Settings are layered in the following order: Built-in defaults < config file < ENV < command line flags. All are optional, the server starts with no flags, no ENV and no config file at its default configuration.
+
+| Config File | Environment Variable | Flag | Default | Description |
+| ----------- | -------------------- | ---- | ------- | ----------- |
+|             | `HTTPDF_CONFIG` | `--config`, `-c` | | Path of the config file. |
+| `listen`    | `HTTPDF_LISTEN` | `--listen`, `-l` | `:8080` | Address to listen on. |
+| `templates` | `HTTPDF_TEMPLATES` | `--templates`, `-t` | `templates` | Directory containing the templates, relative to the working directory, which is `/` in the docker image. |
+| `chromium`  | `HTTPDF_CHROMIUM` | `--chromium` | `/usr/bin/chromium-headless-shell` | Path of the Chromium binary, as installed in the docker image. |
+| `log.format` | `HTTPDF_LOG_FORMAT` | | `json` | Log format written to stdout: `json` or `text`. |
+| `log.level` | `HTTPDF_LOG_LEVEL` | | `info` | Minimum log level: `trace`, `debug`, `info`, `warn` or `error`. `trace` includes Chromium's output, which is useful for debugging the browser. |
+| `limits.maxRequestMB` | `HTTPDF_MAX_REQUEST_MB` | | `10` | Maximum size of a render request's body in megabytes. Larger requests are rejected with `413`. |
+| `limits.maxConcurrentRenders` | `HTTPDF_MAX_CONCURRENT_RENDERS` | | number of CPUs | Maximum number of PDFs rendered at the same time. Further requests wait for a free slot. |
+| `limits.renderTimeout` | `HTTPDF_RENDER_TIMEOUT` | | `20s` | Maximum duration of a render, including the time spent waiting for a free slot, e.g. `20s` or `1m`. Keep it below 25 seconds, the time in-flight requests get to complete on shutdown. |
+
+A config file with all settings looks like this:
+
+```yaml
+listen: ":8080"
+templates: /templates
+chromium: /usr/bin/chromium-headless-shell
+log:
+  format: json
+  level: info
+limits:
+  maxRequestMB: 10
+  maxConcurrentRenders: 4
+  renderTimeout: 20s
+```
 
 ### API
 
@@ -117,7 +138,7 @@ Only translation files for the languages defined in the `config.yaml` file will 
 
 #### Template Validation
 
-In order to check templates for config or syntax errors, use `httpdf-server validate`. It exits with a non-zero status if any template is invalid. Without arguments, it validates all templates. `httpdf-server validate invoice label` validates only the named ones. This is useful as a build step in CI, when adding templates as a docker layer:
+In order to check templates for config or syntax errors, use `httpdf-server validate`. It exits with a non-zero status if any template is invalid. Without arguments, it validates all templates in the templates directory. `httpdf-server validate invoice label` validates only the named ones. This is useful as a build step in CI, when adding templates as a docker layer:
 
 ```dockerfile
 FROM ghcr.io/sehrgutesoftware/httpdf
@@ -139,6 +160,9 @@ It checks that:
 - `template.html` and all partials are free of syntax errors and only use existing functions
 - if `locale` is configured: `locales` isn't empty, contains the `default` locale, and each locale is a valid language tag with a translation file
 - if there's an `example.json`: it matches the schema and renders without errors
+- the server configuration is valid (see [Configuration](#configuration)), because the server wouldn't start otherwise
+
+If your image names a config file that's only mounted at runtime, skip it during the build with `RUN HTTPDF_CONFIG= httpdf-server validate`.
 
 Invalid HTML output or errors in the PDF itself, such as missing assets or broken layouts, **are not** detected (no browser is run during validation).
 
@@ -224,8 +248,8 @@ In order to start the development server, employing hot-reload, use docker compo
 docker compose up
 ```
 
-The container image includes a Chromium instance for HTML rendering. If you want to run the server directly in your host OS without using docker, you need to tell the app the path to a Chromium binary (TBD).
+The container image includes a Chromium instance for HTML rendering. If you want to run the server directly in your host OS without using docker, tell it the path of a Chromium binary, e.g. on macOS:
 
 ```sh
-go run ./cmd/server
+go run ./cmd/server --chromium /Applications/Chromium.app/Contents/MacOS/Chromium
 ```

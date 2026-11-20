@@ -9,8 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,13 +20,10 @@ import (
 	"github.com/sehrgutesoftware/httpdf/internal/pdf"
 	"github.com/sehrgutesoftware/httpdf/internal/subdirfs"
 	"github.com/sehrgutesoftware/httpdf/internal/template"
+	"github.com/urfave/cli/v3"
 )
 
 const (
-	listenOn     = ":8080"
-	chromiumPath = "/usr/bin/chromium-headless-shell"
-	templatesDir = "templates"
-
 	// shutdownTimeout is how long in-flight requests may take to complete after
 	// a shutdown signal.
 	shutdownTimeout = 25 * time.Second
@@ -43,69 +40,197 @@ const (
 // version is set at build time: go build -ldflags "-X main.version=1.2.3"
 var version = "dev"
 
+// errReported is returned by actions that reported their failure already
+var errReported = errors.New("failure reported")
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "validate" {
-		os.Exit(validate(os.Stdout, templatesDir, os.Args[2:]))
+	err := newCommand(os.Stdout, runServer).Run(context.Background(), os.Args)
+	if err != nil {
+		if !errors.Is(err, errReported) {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(1)
+	}
+}
+
+// newCommand creates the command line interface. Without a subcommand, it
+// runs the server with run.
+func newCommand(out io.Writer, run func(ctx context.Context, cfg Config, configFile string) error) *cli.Command {
+	defaults := DefaultConfig()
+
+	// Usage errors are returned to main, which prints them, instead of being
+	// printed along with the help
+	onUsageError := func(ctx context.Context, cmd *cli.Command, err error, isSubcommand bool) error {
+		return fmt.Errorf("%w, see --help", err)
 	}
 
-	logFormat, errLogFormat := envLogFormat("HTTPDF_LOG_FORMAT")
-	logLevel, errLogLevel := envLogLevel("HTTPDF_LOG_LEVEL")
-	maxRequestMB, errMaxRequestMB := envPositiveInt("HTTPDF_MAX_REQUEST_MB", httpdf.DefaultMaxRequestSize>>20)
-	maxRenders, errMaxRenders := envPositiveInt("HTTPDF_MAX_CONCURRENT_RENDERS", httpdf.DefaultMaxConcurrentRenders())
-	renderTimeout, errRenderTimeout := envPositiveDuration("HTTPDF_RENDER_TIMEOUT", httpdf.DefaultRenderTimeout)
+	return &cli.Command{
+		Name:    "httpdf-server",
+		Usage:   "Render PDFs from HTML templates via HTTP",
+		Version: version,
+		Description: "Settings are taken from the defaults, the config file, the " + envPrefix + "* environment\n" +
+			"variables and the flags below, each overriding the previous. See the README\n" +
+			"for all settings.",
+		Writer:       out,
+		OnUsageError: onUsageError,
+		// The flags' environment variables are read along with the others by
+		// LoadEnv, so they're only mentioned in the usage, except for the
+		// config file, which has to be known before
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "config",
+				Aliases: []string{"c"},
+				Usage:   "path of a config file",
+				Sources: cli.EnvVars(envPrefix + "CONFIG"),
+			},
+			&cli.StringFlag{
+				Name:    "listen",
+				Aliases: []string{"l"},
+				Usage:   "address to listen on [$" + envPrefix + "LISTEN]",
+				Value:   defaults.Listen,
+			},
+			&cli.StringFlag{
+				Name:    "templates",
+				Aliases: []string{"t"},
+				Usage:   "directory containing the templates [$" + envPrefix + "TEMPLATES]",
+				Value:   defaults.Templates,
+			},
+			&cli.StringFlag{
+				Name:  "chromium",
+				Usage: "path of the Chromium binary [$" + envPrefix + "CHROMIUM]",
+				Value: defaults.Chromium,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Args().Present() {
+				return fmt.Errorf("unexpected argument %q, see --help", cmd.Args().First())
+			}
+			cfg, err := loadConfig(cmd)
+			if err != nil {
+				return err
+			}
+			return run(ctx, cfg, cmd.String("config"))
+		},
+		Commands: []*cli.Command{
+			{
+				Name:         "validate",
+				Usage:        "check all templates for errors, or only the named ones",
+				ArgsUsage:    "[template ...]",
+				OnUsageError: onUsageError,
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					cfg, err := loadConfig(cmd)
+					if err != nil {
+						return err
+					}
+					if validate(out, cfg.Templates, cmd.Args().Slice()) != 0 {
+						return errReported
+					}
+					return nil
+				},
+			},
+		},
+	}
+}
 
+// loadConfig layers the config: the defaults, the config file if one is given,
+// the environment variables, and the flags set on the command line.
+func loadConfig(cmd *cli.Command) (Config, error) {
+	cfg := DefaultConfig()
+
+	if path := cmd.String("config"); path != "" {
+		if err := cfg.LoadFile(path); err != nil {
+			return Config{}, fmt.Errorf("invalid configuration: %w", err)
+		}
+	}
+	if err := cfg.LoadEnv(); err != nil {
+		return Config{}, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Flags only override the other sources if they're set explicitly
+	for name, value := range map[string]*string{
+		"listen":    &cfg.Listen,
+		"templates": &cfg.Templates,
+		"chromium":  &cfg.Chromium,
+	} {
+		if cmd.IsSet(name) {
+			*value = cmd.String(name)
+		}
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return Config{}, fmt.Errorf("invalid configuration: %w", err)
+	}
+	return cfg, nil
+}
+
+// runServer runs the server with the given config until it receives SIGTERM
+// or SIGINT.
+func runServer(ctx context.Context, cfg Config, configFile string) error {
+	logFormat := strings.ToLower(cfg.Log.Format)
+	logLevel, _ := logging.ParseLevel(cfg.Log.Level) // validated by loadConfig
 	logger := newLogger(os.Stdout, logFormat, logLevel)
 	slog.SetDefault(logger)
 
-	if err := errors.Join(errLogFormat, errLogLevel, errMaxRequestMB, errMaxRenders, errRenderTimeout); err != nil {
-		logger.Error("invalid configuration", "error", err)
-		os.Exit(1)
-	}
-
-	warnInvalidTemplates(logger, templatesDir)
+	warnInvalidTemplates(logger, cfg.Templates)
+	warnMissingChromium(logger, cfg.Chromium)
 
 	opts := []httpdf.Option{
 		httpdf.WithLogger(logger),
-		httpdf.WithMaxRequestSize(int64(maxRequestMB) << 20),
-		httpdf.WithMaxConcurrentRenders(maxRenders),
-		httpdf.WithRenderTimeout(renderTimeout),
+		httpdf.WithMaxRequestSize(int64(cfg.Limits.MaxRequestMB) << 20),
+		httpdf.WithMaxConcurrentRenders(cfg.Limits.MaxConcurrentRenders),
+		httpdf.WithRenderTimeout(cfg.Limits.RenderTimeout),
 	}
-	loader := template.NewFSLoader(subdirfs.New(templatesDir))
-	pdfRenderer := pdf.NewRodRenderer(chromiumPath,
+	loader := template.NewFSLoader(subdirfs.New(cfg.Templates))
+	pdfRenderer := pdf.NewRodRenderer(cfg.Chromium,
 		pdf.WithLogger(logger),
 		pdf.WithCreatorPrefix("httpdf/"+version),
 	)
 	app := httpdf.New(pdfRenderer, opts...)
-	server := newHTTPServer(httpdf.NewServer(app, loader, opts...), logger, renderTimeout)
+	server := newHTTPServer(httpdf.NewServer(app, loader, opts...), logger, cfg.Limits.RenderTimeout)
 
-	listener, err := net.Listen("tcp", listenOn)
+	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		logger.Error("server failed", "error", err)
-		os.Exit(1)
+		return errReported
 	}
 
-	logger.Info("server starting",
+	attrs := []any{
 		"version", version,
-		"address", listenOn,
+		// The listener's address shows the port in use, e.g. for port 0
+		"address", listener.Addr().String(),
 		"log_format", logFormat,
 		"log_level", logging.LevelName(logLevel),
-		"chromium", chromiumPath,
-		"templates", templatesDir,
-		"max_request_mb", maxRequestMB,
-		"max_concurrent_renders", maxRenders,
-		"render_timeout", renderTimeout.String(),
-	)
+		"chromium", cfg.Chromium,
+		"templates", cfg.Templates,
+		"max_request_mb", cfg.Limits.MaxRequestMB,
+		"max_concurrent_renders", cfg.Limits.MaxConcurrentRenders,
+		"render_timeout", cfg.Limits.RenderTimeout.String(),
+	}
+	if configFile != "" {
+		attrs = append(attrs, "config_file", configFile)
+	}
+	logger.Info("server starting", attrs...)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, os.Interrupt)
 	// Restore the default signal handling after the first signal, so that a
 	// second one terminates the process immediately.
 	context.AfterFunc(ctx, stop)
 
 	if err := serve(ctx, server, listener, logger, shutdownTimeout); err != nil {
 		logger.Error("server failed", "error", err)
-		os.Exit(1)
+		return errReported
 	}
 	logger.Info("server stopped")
+	return nil
+}
+
+// warnMissingChromium logs a warning if the Chromium binary can't be run. It
+// looks it up like the renderer does: bare names in PATH, others as paths,
+// which must be executable files.
+func warnMissingChromium(logger *slog.Logger, chromium string) {
+	if _, err := exec.LookPath(chromium); err != nil {
+		logger.Warn("chromium not found, rendering PDFs will fail", "chromium", chromium, "error", err)
+	}
 }
 
 // serve runs the server until ctx is canceled, then shuts it down gracefully.
@@ -161,61 +286,4 @@ func newLogger(w io.Writer, format string, level slog.Level) *slog.Logger {
 		return slog.New(slog.NewTextHandler(w, opts))
 	}
 	return slog.New(slog.NewJSONHandler(w, opts))
-}
-
-// envLogFormat reads the log format from the named env var. Defaults to json.
-func envLogFormat(name string) (string, error) {
-	v := os.Getenv(name)
-	switch f := strings.ToLower(v); f {
-	case "":
-		return "json", nil
-	case "json", "text":
-		return f, nil
-	default:
-		return "json", fmt.Errorf("%s: must be json or text, got %q", name, v)
-	}
-}
-
-// envLogLevel reads the log level from the named env var. Defaults to info.
-func envLogLevel(name string) (slog.Level, error) {
-	v := os.Getenv(name)
-	if v == "" {
-		return slog.LevelInfo, nil
-	}
-
-	level, err := logging.ParseLevel(v)
-	if err != nil {
-		return slog.LevelInfo, fmt.Errorf("%s: must be trace, debug, info, warn or error, got %q", name, v)
-	}
-	return level, nil
-}
-
-// envPositiveInt reads a positive integer from the named env var. Defaults to
-// def.
-func envPositiveInt(name string, def int) (int, error) {
-	v := os.Getenv(name)
-	if v == "" {
-		return def, nil
-	}
-
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		return def, fmt.Errorf("%s: must be a positive integer, got %q", name, v)
-	}
-	return n, nil
-}
-
-// envPositiveDuration reads a positive duration, such as 20s or 1m30s, from the
-// named env var. Defaults to def.
-func envPositiveDuration(name string, def time.Duration) (time.Duration, error) {
-	v := os.Getenv(name)
-	if v == "" {
-		return def, nil
-	}
-
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return def, fmt.Errorf("%s: must be a positive duration such as 20s, got %q", name, v)
-	}
-	return d, nil
 }

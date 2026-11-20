@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An optional config file, read if `--config` or `HTTPDF_CONFIG` names it
+- The listen address, the templates directory and the Chromium binary are configurable via `--listen`, `--templates` and `--chromium`, or `HTTPDF_LISTEN`, `HTTPDF_TEMPLATES` and `HTTPDF_CHROMIUM`
+- A warning at startup if the Chromium binary can't be found or isn't executable.
+
 ### Changed
 
 - Failed page requests are logged at `debug`, all of them, instead of the first 20 at `warn`. A `page requests failed` warning summarizes them by status and error, along with the number of requests, whenever a request failed. Pending requests are logged the same way, as `page request pending` at `debug` and a `page requests pending` warning with their number. Below `debug`, the warnings point out the log level as `hint`.
+- An invalid configuration is printed to stderr instead of being logged to stdout, since the log format is part of the configuration.
+- `httpdf-server validate` also fails if the server configuration is invalid. If the image names a config file that's only mounted at runtime, skip it during the build with `HTTPDF_CONFIG= httpdf-server validate`.
 
 ## [0.11.2] - 2026-11-20
 

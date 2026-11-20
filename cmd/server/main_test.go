@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,120 +16,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEnvLogFormat(t *testing.T) {
+func TestWarnMissingChromium(t *testing.T) {
+	notExecutable := filepath.Join(t.TempDir(), "chromium")
+	require.NoError(t, os.WriteFile(notExecutable, nil, 0o644))
+
 	cases := map[string]struct {
-		value   string
-		want    string
-		wantErr bool
+		chromium string
+		warning  string
 	}{
-		"defaults_to_json":    {value: "", want: "json"},
-		"accepts_json":        {value: "json", want: "json"},
-		"accepts_text":        {value: "text", want: "text"},
-		"is_case_insensitive": {value: "TEXT", want: "text"},
-		"rejects_unknown_format_and_falls_back_to_json": {value: "xml", want: "json", wantErr: true},
+		"bare_name_in_path":         {chromium: "sh"},
+		"executable_path":           {chromium: "/bin/sh"},
+		"bare_name_not_in_path":     {chromium: "no-such-chromium", warning: "not found in $PATH"},
+		"missing_path":              {chromium: "/no/such/chromium", warning: "no such file or directory"},
+		"directory":                 {chromium: t.TempDir(), warning: "is a directory"},
+		"file_that_isnt_executable": {chromium: notExecutable, warning: "permission denied"},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("TEST_LOG_FORMAT", tc.value)
+			var buf bytes.Buffer
 
-			got, err := envLogFormat("TEST_LOG_FORMAT")
+			warnMissingChromium(newLogger(&buf, "json", slog.LevelInfo), tc.chromium)
 
-			assert.Equal(t, tc.want, got)
-			if tc.wantErr {
-				assert.ErrorContains(t, err, "TEST_LOG_FORMAT")
-			} else {
-				assert.NoError(t, err)
+			if tc.warning == "" {
+				assert.Empty(t, buf.String())
+				return
 			}
-		})
-	}
-}
-
-func TestEnvLogLevel(t *testing.T) {
-	cases := map[string]struct {
-		value   string
-		want    slog.Level
-		wantErr bool
-	}{
-		"defaults_to_info": {value: "", want: slog.LevelInfo},
-		"accepts_trace":    {value: "trace", want: logging.LevelTrace},
-		"accepts_debug":    {value: "debug", want: slog.LevelDebug},
-		"accepts_warn":     {value: "warn", want: slog.LevelWarn},
-		"accepts_error":    {value: "ERROR", want: slog.LevelError},
-		"rejects_unknown_level_and_falls_back_to_info": {value: "verbose", want: slog.LevelInfo, wantErr: true},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("TEST_LOG_LEVEL", tc.value)
-
-			got, err := envLogLevel("TEST_LOG_LEVEL")
-
-			assert.Equal(t, tc.want, got)
-			if tc.wantErr {
-				assert.ErrorContains(t, err, "TEST_LOG_LEVEL")
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestEnvPositiveInt(t *testing.T) {
-	cases := map[string]struct {
-		value   string
-		want    int
-		wantErr bool
-	}{
-		"defaults_to_the_default":                    {value: "", want: 7},
-		"accepts_a_positive_integer":                 {value: "3", want: 3},
-		"rejects_zero_and_falls_back_to_the_default": {value: "0", want: 7, wantErr: true},
-		"rejects_negative_numbers":                   {value: "-1", want: 7, wantErr: true},
-		"rejects_fractions":                          {value: "1.5", want: 7, wantErr: true},
-		"rejects_non_numeric_values":                 {value: "many", want: 7, wantErr: true},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("TEST_INT", tc.value)
-
-			got, err := envPositiveInt("TEST_INT", 7)
-
-			assert.Equal(t, tc.want, got)
-			if tc.wantErr {
-				assert.ErrorContains(t, err, "TEST_INT: must be a positive integer")
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestEnvPositiveDuration(t *testing.T) {
-	cases := map[string]struct {
-		value   string
-		want    time.Duration
-		wantErr bool
-	}{
-		"defaults_to_the_default":                    {value: "", want: 20 * time.Second},
-		"accepts_a_duration":                         {value: "1m30s", want: 90 * time.Second},
-		"rejects_zero_and_falls_back_to_the_default": {value: "0s", want: 20 * time.Second, wantErr: true},
-		"rejects_negative_durations":                 {value: "-5s", want: 20 * time.Second, wantErr: true},
-		"rejects_numbers_without_unit":               {value: "20", want: 20 * time.Second, wantErr: true},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("TEST_DURATION", tc.value)
-
-			got, err := envPositiveDuration("TEST_DURATION", 20*time.Second)
-
-			assert.Equal(t, tc.want, got)
-			if tc.wantErr {
-				assert.ErrorContains(t, err, "TEST_DURATION: must be a positive duration")
-			} else {
-				assert.NoError(t, err)
-			}
+			var record map[string]any
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &record))
+			assert.Equal(t, "WARN", record["level"])
+			assert.Equal(t, "chromium not found, rendering PDFs will fail", record["msg"])
+			assert.Equal(t, tc.chromium, record["chromium"])
+			assert.Contains(t, record["error"], tc.warning)
 		})
 	}
 }
