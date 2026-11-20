@@ -51,6 +51,8 @@ func TestPrintToPDFParams(t *testing.T) {
 // The rodRenderer tests need Chromium, e.g. in the development container:
 //
 //	docker compose run --rm --entrypoint go -e HTTPDF_TEST_CHROMIUM=/usr/bin/chromium-headless-shell httpdf test ./internal/pdf/
+//
+// CI runs them the same way (see the integration job in .github/workflows/ci.yml).
 func TestRodRenderer(t *testing.T) {
 	chromium := os.Getenv("HTTPDF_TEST_CHROMIUM")
 	if chromium == "" {

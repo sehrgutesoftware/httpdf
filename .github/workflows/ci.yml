@@ -35,13 +35,60 @@ jobs:
             exit 1
           fi
 
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          for file in $unformatted; do
+            echo "::error file=$file::$file isn't formatted, run gofmt -w $file"
+          done
+          [ -z "$unformatted" ]
+
+      - name: Run go vet
+        run: go vet ./...
+
       - name: Run tests
         run: go test -v ./... -coverprofile=coverage.txt -covermode=atomic
+
+  integration:
+    # The renderer tests need Chromium, so they run in the development image,
+    # which has the same Chromium as the production image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the development image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: hot-reload
+          load: true
+          tags: httpdf-dev
+          cache-from: type=gha,scope=hot-reload
+          cache-to: type=gha,scope=hot-reload,mode=max
+
+      - name: Run renderer tests
+        shell: bash # with pipefail, so a failing test fails the step despite tee
+        run: |
+          docker run --rm -v "$PWD:/app" --entrypoint go \
+            -e HTTPDF_TEST_CHROMIUM=/usr/bin/chromium-headless-shell \
+            httpdf-dev test -v ./internal/pdf/ | tee "$RUNNER_TEMP/test.log"
+          # The renderer tests skip themselves if HTTPDF_TEST_CHROMIUM isn't set
+          if grep -q -- '--- SKIP: TestRodRenderer' "$RUNNER_TEMP/test.log"; then
+            echo "::error file=internal/pdf/renderer_test.go::TestRodRenderer was skipped"
+            exit 1
+          fi
 
   build:
     # The image is only built and published for version tags
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [test, integration]
     runs-on: ubuntu-latest
     permissions:
       contents: read
