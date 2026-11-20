@@ -528,7 +528,9 @@ func TestQrCodeFunc(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := string(qrCodeFunc(tt.size, tt.data))
+			url, err := qrCodeFunc(tt.size, tt.data)
+			require.NoError(t, err)
+			result := string(url)
 
 			// Check that result starts with the correct data URL prefix
 			assert.True(t, strings.HasPrefix(result, "data:image/png;base64,"),
@@ -630,10 +632,55 @@ func TestBarcodeTemplateFuncsIntegration(t *testing.T) {
 	assert.NotNil(t, funcs["qrCode"])
 
 	// Verify the function signature
-	qrCodeFunc, ok := funcs["qrCode"].(func(int, string) template.URL)
-	assert.True(t, ok, "qrCode function should have correct signature")
+	qrCodeFunc, ok := funcs["qrCode"].(func(int, string) (template.URL, error))
+	require.True(t, ok, "qrCode function should have correct signature")
 
 	// Test the function directly
-	result := qrCodeFunc(100, "test")
+	result, err := qrCodeFunc(100, "test")
+	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(string(result), "data:image/png;base64,"))
+}
+
+func TestQrCodeFuncErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		size int
+		data string
+		err  string
+	}{
+		{
+			// A version 40 QR code holds at most 2331 bytes at level M
+			name: "data too long",
+			size: 0,
+			data: strings.Repeat("x", 3000),
+			err:  "qrCode: data is too long for a QR code (3000 bytes)",
+		},
+		{
+			// The smallest QR code has 21x21 modules
+			name: "size smaller than the code",
+			size: 10,
+			data: "hi",
+			err:  "qrCode: size 10 is too small for the data, it needs at least 21",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, err := qrCodeFunc(tt.size, tt.data)
+			assert.EqualError(t, err, tt.err)
+			assert.Empty(t, url)
+		})
+	}
+}
+
+func TestQrCodeFuncErrorInTemplate(t *testing.T) {
+	funcs := templateFuncs("")
+	barcodeTemplateFuncs(funcs)
+
+	tmpl, err := template.New("test").Funcs(funcs).Parse(`<img src="{{qrCode 0 .data}}">`)
+	require.NoError(t, err)
+
+	err = tmpl.Execute(&strings.Builder{}, map[string]any{"data": strings.Repeat("x", 3000)})
+	assert.ErrorContains(t, err, "qrCode: data is too long for a QR code (3000 bytes)")
+	assert.NotContains(t, err.Error(), "xxx", "the error shouldn't contain the data")
 }

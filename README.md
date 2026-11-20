@@ -236,6 +236,8 @@ Parameters:
 
 The function returns a complete data URL string in the format `data:image/png;base64,<encoded-data>` that can be used directly as an image source.
 
+The render fails if the data doesn't fit into a QR code (up to 2331 bytes of arbitrary text, more if it consists only of digits or uppercase letters), or if the size is smaller than the QR code's grid of modules (at least 21 pixels, more for longer data).
+
 ## Changelog
 
 Notable changes in each release, including how to migrate across breaking changes, are listed in [CHANGELOG.md](CHANGELOG.md).

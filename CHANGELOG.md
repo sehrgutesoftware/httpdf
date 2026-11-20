@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `qrCode` failed with a cryptic nil pointer error if the data was too long for a QR code, or if the size was smaller than the code's grid of modules. The error now names the cause.
+
 ### Added
 
 - An optional config file, read if `--config` or `HTTPDF_CONFIG` names it
