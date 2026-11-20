@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An optional config file, read if `--config` or `HTTPDF_CONFIG` names it
 - The listen address, the templates directory and the Chromium binary are configurable via `--listen`, `--templates` and `--chromium`, or `HTTPDF_LISTEN`, `HTTPDF_TEMPLATES` and `HTTPDF_CHROMIUM`
 - A warning at startup if the Chromium binary can't be found or isn't executable.
+- Build docker images from the main branch, tagged with git short sha
 
 ### Changed
 
