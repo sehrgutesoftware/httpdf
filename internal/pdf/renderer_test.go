@@ -5,9 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -141,6 +146,62 @@ func TestRodRenderer(t *testing.T) {
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.Less(t, time.Since(start), 5*time.Second, "the browser should be stopped right away")
 		assert.Equal(t, before, profiles(t))
+	})
+
+	t.Run("it_logs_the_pages_failed_requests", func(t *testing.T) {
+		// A port that refuses connections. Chromium blocks well-known ones like
+		// 1 with ERR_UNSAFE_PORT instead.
+		closed, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		refused := "http://" + closed.Addr().String() + "/refused.png"
+		require.NoError(t, closed.Close())
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, `<!doctype html><html><body>
+				<img src="/ok.png">
+				<div style="width: 10px; height: 10px; background-image: url(/throttled.png)"></div>
+				<img src="`+refused+`">
+			</body></html>`)
+		})
+		mux.HandleFunc("GET /ok.png", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			_ = png.Encode(w, image.NewGray(image.Rect(0, 0, 1, 1)))
+		})
+		mux.HandleFunc("GET /throttled.png", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "SlowDown", http.StatusServiceUnavailable)
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+
+		var log bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		err = NewRodRenderer(chromium, WithLogger(logger)).Render(t.Context(), server.URL, io.Discard, a4)
+		require.NoError(t, err)
+
+		failed := map[string]map[string]any{}
+		var rendered map[string]any
+		for line := range strings.Lines(log.String()) {
+			var record map[string]any
+			require.NoError(t, json.Unmarshal([]byte(line), &record))
+			assert.NotEqual(t, "page requests pending", record["msg"])
+			switch record["msg"] {
+			case "page request failed":
+				failed[record["url"].(string)] = record
+			case "pdf rendered":
+				rendered = record
+			}
+		}
+
+		require.Len(t, failed, 2, "failed requests: %v", failed)
+		assert.Equal(t, "WARN", failed["/throttled.png"]["level"])
+		assert.Equal(t, "Image", failed["/throttled.png"]["type"])
+		assert.Equal(t, float64(503), failed["/throttled.png"]["status"])
+		assert.Equal(t, "net::ERR_CONNECTION_REFUSED", failed[refused]["error"])
+		require.NotNil(t, rendered)
+		assert.Equal(t, float64(4), rendered["requests"], "the page and its three images")
+		assert.Equal(t, float64(2), rendered["failed_requests"])
 	})
 
 	t.Run("it_keeps_the_creator_without_prefix", func(t *testing.T) {

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ...
 
+## [0.11.1] - 2026-11-20
+
+### Added
+
+- Failed requests of the page are logged as `page request failed` warnings with their URL, resource type, duration and HTTP status or network error, because the PDF is rendered without them. Only the first 20 failures of a render are logged one by one, followed by a `page requests failed` summary with the number of failures by status or error, so that an unreachable server doesn't flood the log. Requests that are still pending when the PDF is printed are logged as `page requests pending`.
+- The `pdf rendered` debug log contains the number of the page's requests and failed requests as `requests` and `failed_requests`.
+
+### Changed
+
+- Failed asset requests are logged at `debug` instead of `warn`, because they're reported as `page request failed` warnings now, along with the page's other failed requests.
+
 ## [0.11.0] - 2026-11-19
 
 ### Added
@@ -145,7 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <p>Current locale: {{ locale }}</p>
   ```
 
-[Unreleased]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/sehrgutesoftware/httpdf/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/sehrgutesoftware/httpdf/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/sehrgutesoftware/httpdf/compare/v0.9.1...v0.10.0

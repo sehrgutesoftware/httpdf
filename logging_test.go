@@ -442,7 +442,7 @@ func TestHTTPDF_AssetLog(t *testing.T) {
 		assert.Equal(t, "4bf92f3577b34da6a3ce929d0e0e4736", record["trace_id"])
 	})
 
-	t.Run("it_logs_failed_asset_requests_at_warn", func(t *testing.T) {
+	t.Run("it_logs_failed_asset_requests_at_debug", func(t *testing.T) {
 		cases := map[string]struct {
 			path string
 			tmpl string
@@ -456,7 +456,7 @@ func TestHTTPDF_AssetLog(t *testing.T) {
 				buf := render(t, &assetRenderer{path: tc.path}, tc.tmpl)
 
 				record := logRecord(t, buf, "asset request")
-				assert.Equal(t, "WARN", record["level"])
+				assert.Equal(t, "DEBUG", record["level"])
 				assert.Equal(t, "assets", record["component"])
 				assert.Equal(t, tc.path, record["path"])
 				assert.Equal(t, float64(404), record["status"])

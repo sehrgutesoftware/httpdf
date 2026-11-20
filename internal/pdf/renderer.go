@@ -118,18 +118,27 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 	}
 	defer r.stopBrowser(ctx, l, browser)
 
-	// Load the HTML content into a new page
-	page, err := browser.Page(proto.TargetCreateTarget{
-		URL: url,
-	})
+	// Load the HTML content into a new page, which is opened blank, so that
+	// its requests are tracked from the first one
+	page, err := browser.Page(proto.TargetCreateTarget{})
 	if err != nil {
 		return fmt.Errorf("failed to create new page: %w", err)
+	}
+	requests, stopTracking, err := trackRequests(ctx, page, url, r.logger)
+	if err != nil {
+		return fmt.Errorf("failed to track the page's requests: %w", err)
+	}
+	defer stopTracking()
+	err = page.Navigate(url)
+	if err != nil {
+		return fmt.Errorf("failed to load page: %w", err)
 	}
 	err = page.WaitStable(50 * time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
 	loaded := time.Now()
+	requests.logPending()
 
 	// Save the page as a PDF
 	width := dumbify(opts.Width)
@@ -173,10 +182,15 @@ func (r *rodRenderer) Render(ctx context.Context, url string, pdf io.Writer, opt
 		}
 	}
 
+	stopTracking()
+	requests.logSummary()
+	total, failed := requests.counts()
 	r.logger.LogAttrs(ctx, slog.LevelDebug, "pdf rendered",
 		slog.Float64("launch_ms", logging.Millis(launched.Sub(start))),
 		slog.Float64("load_ms", logging.Millis(loaded.Sub(launched))),
 		slog.Float64("pdf_ms", logging.MillisSince(loaded)),
+		slog.Int("requests", total),
+		slog.Int("failed_requests", failed),
 	)
 
 	return nil

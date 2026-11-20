@@ -156,8 +156,8 @@ func (h *httpdf) serve(ctx context.Context, assets fs.FS, html []byte) http.Hand
 }
 
 // serveAssets serves the template's assets to the browser and logs each
-// request. Failed requests are logged as warnings, because the PDF will be
-// generated without the asset.
+// request at debug level. Failed requests are logged as warnings by the
+// renderer, along with the page's other failed requests.
 func (h *httpdf) serveAssets(ctx context.Context, assets fs.FS) http.Handler {
 	files := http.NotFoundHandler()
 	if assets != nil {
@@ -169,13 +169,8 @@ func (h *httpdf) serveAssets(ctx context.Context, assets fs.FS) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w}
 		files.ServeHTTP(rec, r)
 
-		level := slog.LevelDebug
-		if rec.statusCode() >= 400 {
-			level = slog.LevelWarn
-		}
-
 		// The render's context carries the request and trace IDs
-		h.logger.LogAttrs(ctx, level, "asset request",
+		h.logger.LogAttrs(ctx, slog.LevelDebug, "asset request",
 			slog.String("component", "assets"),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", rec.statusCode()),
