@@ -15,12 +15,26 @@ func barcodeTemplateFuncs(funcs template.FuncMap) {
 	funcs["qrCode"] = qrCodeFunc
 }
 
+// maxQrCodeSize limits the width and height of QR codes in pixels. Encoding the
+// PNG takes time proportional to the number of pixels, and the size may come
+// from the request data.
+const maxQrCodeSize = 4096
+
 // qrCodeFunc generates a QR code from the given data and returns it as a data
 // URL containing a PNG image. It's typed as a URL, because html/template would
-// otherwise replace the data URL with a placeholder in src attributes.
-func qrCodeFunc(size int, data string) (template.URL, error) {
+// otherwise replace the data URL with a placeholder in src attributes. The size
+// can be an integer of any type, or a float without fractional part, such as a
+// number from JSON.
+func qrCodeFunc(sizeArg any, data string) (template.URL, error) {
+	size, err := toInt(sizeArg)
+	if err != nil {
+		return "", fmt.Errorf("qrCode: size: %w", err)
+	}
 	if size <= 0 {
 		size = 256 // default size
+	}
+	if size > maxQrCodeSize {
+		return "", fmt.Errorf("qrCode: size %d is too large, the maximum is %d", size, maxQrCodeSize)
 	}
 
 	// With automatic encoding, the data can only fail to encode if it's too

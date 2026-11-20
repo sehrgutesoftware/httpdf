@@ -255,6 +255,22 @@ func TestRender(t *testing.T) {
 		assert.ErrorContains(t, err, "chunk: size must be greater than 0, got 0")
 	})
 
+	t.Run("it_uses_a_qr_code_size_from_the_request_data", func(t *testing.T) {
+		tmpl := &template.Template{}
+		tmpl.WriteString(`<img src="{{qrCode .size .url}}">`)
+
+		var output bytes.Buffer
+		values := map[string]any{
+			"size": 128.0, // JSON numbers are float64
+			"url":  "https://example.com",
+		}
+
+		err := tmpl.Render(values, "/assets", "en", &output)
+
+		assert.NoError(t, err)
+		assert.Contains(t, output.String(), `<img src="data:image/png;base64,`)
+	})
+
 	t.Run("it_handles_templates_without_i18n", func(t *testing.T) {
 		tmpl := &template.Template{
 			I18n: nil,

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `qrCode` failed with a cryptic nil pointer error if the data was too long for a QR code, or if the size was smaller than the code's grid of modules. The error now names the cause.
+- `qrCode` failed for sizes from the request data, which are JSON numbers. Sizes are now limited to 4096 pixels, because encoding larger images takes a long time.
 
 ### Added
 

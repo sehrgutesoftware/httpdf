@@ -231,7 +231,7 @@ Example usage in template:
 ```
 
 Parameters:
-- `size` (int): Width and height of the QR code in pixels. If 0 or negative, defaults to 256 pixels
+- `size` (integer): Width and height of the QR code in pixels, at most 4096. If 0 or negative, defaults to 256 pixels. Can come from the request data, e.g. `{{ qrCode .qrSize .url }}`
 - `data` (string): The text data to encode in the QR code
 
 The function returns a complete data URL string in the format `data:image/png;base64,<encoded-data>` that can be used directly as an image source.

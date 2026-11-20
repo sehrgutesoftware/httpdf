@@ -1,9 +1,12 @@
 package template
 
 import (
+	"bytes"
 	"encoding/base64"
+	"fmt"
 	"html"
 	"html/template"
+	"image/png"
 	"os"
 	"strings"
 	"testing"
@@ -478,10 +481,28 @@ func TestUnsafeSprigFuncsAreRemoved(t *testing.T) {
 func TestQrCodeFunc(t *testing.T) {
 	tests := []struct {
 		name         string
-		size         int
+		size         any
 		data         string
 		expectedSize int // The size we expect to be used (after default handling)
 	}{
+		{
+			name:         "size from JSON",
+			size:         128.0,
+			data:         "Hello World",
+			expectedSize: 128,
+		},
+		{
+			name:         "size of another integer type",
+			size:         uint16(128),
+			data:         "Hello World",
+			expectedSize: 128,
+		},
+		{
+			name:         "maximum size",
+			size:         maxQrCodeSize,
+			data:         "Hello World",
+			expectedSize: maxQrCodeSize,
+		},
 		{
 			name:         "positive size with simple data",
 			size:         128,
@@ -552,6 +573,11 @@ func TestQrCodeFunc(t *testing.T) {
 				assert.Equal(t, pngSignature, decodedData[:8],
 					"Decoded data should have PNG signature")
 			}
+
+			img, err := png.DecodeConfig(bytes.NewReader(decodedData))
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedSize, img.Width)
+			assert.Equal(t, tt.expectedSize, img.Height)
 		})
 	}
 }
@@ -632,7 +658,7 @@ func TestBarcodeTemplateFuncsIntegration(t *testing.T) {
 	assert.NotNil(t, funcs["qrCode"])
 
 	// Verify the function signature
-	qrCodeFunc, ok := funcs["qrCode"].(func(int, string) (template.URL, error))
+	qrCodeFunc, ok := funcs["qrCode"].(func(any, string) (template.URL, error))
 	require.True(t, ok, "qrCode function should have correct signature")
 
 	// Test the function directly
@@ -644,10 +670,19 @@ func TestBarcodeTemplateFuncsIntegration(t *testing.T) {
 func TestQrCodeFuncErrors(t *testing.T) {
 	tests := []struct {
 		name string
-		size int
+		size any
 		data string
 		err  string
 	}{
+		{name: "fractional size", size: 128.5, data: "hi", err: "qrCode: size: expected an integer, got 128.5"},
+		{name: "non-numeric size", size: "128", data: "hi", err: "qrCode: size: expected an integer, got string"},
+		{name: "missing size", size: nil, data: "hi", err: "qrCode: size: expected an integer, got <nil>"},
+		{
+			name: "size too large",
+			size: 1e6,
+			data: "hi",
+			err:  fmt.Sprintf("qrCode: size 1000000 is too large, the maximum is %d", maxQrCodeSize),
+		},
 		{
 			// A version 40 QR code holds at most 2331 bytes at level M
 			name: "data too long",
