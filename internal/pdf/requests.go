@@ -34,6 +34,7 @@ type requestTracker struct {
 
 	mu       sync.Mutex
 	pending  map[proto.NetworkRequestID]trackedRequest
+	statuses map[proto.NetworkRequestID]int
 	total    int
 	failures map[string]int
 	failed   int
@@ -62,7 +63,7 @@ func trackRequests(ctx context.Context, page *rod.Page, pageURL string, logger *
 	t = newRequestTracker(ctx, pageURL, logger)
 	eventsCtx, stop := context.WithCancel(ctx)
 	// EachEvent subscribes right away, wait only dispatches the events
-	wait := page.Context(eventsCtx).EachEvent(t.onRequest, t.onResponse, t.onFinished, t.onFailed)
+	wait := page.Context(eventsCtx).EachEvent(t.onRequest, t.onResponseHeaders, t.onResponse, t.onFinished, t.onFailed)
 	go wait()
 
 	return t, stop, nil
@@ -73,6 +74,7 @@ func newRequestTracker(ctx context.Context, pageURL string, logger *slog.Logger)
 		ctx:      ctx,
 		logger:   logger,
 		pending:  map[proto.NetworkRequestID]trackedRequest{},
+		statuses: map[proto.NetworkRequestID]int{},
 		failures: map[string]int{},
 	}
 	if u, err := url.Parse(pageURL); err == nil && u.Host != "" {
@@ -92,13 +94,33 @@ func (t *requestTracker) onRequest(e *proto.NetworkRequestWillBeSent) {
 	t.pending[e.RequestID] = trackedRequest{url: e.Request.URL, typ: e.Type, started: e.Timestamp}
 }
 
+// onResponseHeaders records the status of a response as it was received.
+// Chromium doesn't pass some responses on to the page, which then fails with
+// an error instead, e.g. net::ERR_BLOCKED_BY_ORB for cross-origin images with
+// an error status and an XML body, as S3 sends them for missing objects or
+// throttled requests. Their status is only known from here.
+//
+// The event comes from Chromium's network service rather than the page, so
+// it may arrive before the request's onRequest.
+func (t *requestTracker) onResponseHeaders(e *proto.NetworkResponseReceivedExtraInfo) {
+	// A redirect is followed by another request, whose failure isn't the
+	// redirect's
+	if e.StatusCode >= 300 && e.StatusCode < 400 {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.statuses[e.RequestID] = e.StatusCode
+}
+
 func (t *requestTracker) onResponse(e *proto.NetworkResponseReceived) {
 	if e.Response.Status < 400 {
 		return
 	}
 
-	t.fail(e.RequestID, strconv.Itoa(e.Response.Status), e.Timestamp,
-		slog.Int("status", e.Response.Status),
+	t.fail(e.RequestID, e.Timestamp, e.Response.Status, "",
 		slog.String("protocol", e.Response.Protocol),
 		slog.String("remote_ip", e.Response.RemoteIPAddress),
 	)
@@ -109,10 +131,11 @@ func (t *requestTracker) onFinished(e *proto.NetworkLoadingFinished) {
 	defer t.mu.Unlock()
 
 	delete(t.pending, e.RequestID)
+	delete(t.statuses, e.RequestID)
 }
 
 func (t *requestTracker) onFailed(e *proto.NetworkLoadingFailed) {
-	attrs := []slog.Attr{slog.String("error", e.ErrorText)}
+	var attrs []slog.Attr
 	if e.Canceled {
 		attrs = append(attrs, slog.Bool("canceled", true))
 	}
@@ -120,22 +143,36 @@ func (t *requestTracker) onFailed(e *proto.NetworkLoadingFailed) {
 		attrs = append(attrs, slog.String("blocked_reason", string(e.BlockedReason)))
 	}
 
-	t.fail(e.RequestID, e.ErrorText, e.Timestamp, attrs...)
+	t.fail(e.RequestID, e.Timestamp, 0, e.ErrorText, attrs...)
 }
 
-// fail counts a failed request under the given reason and logs it, unless
-// maxLoggedFailures have been logged already. A request is only counted once,
-// e.g. if its body fails to load after an error status.
-func (t *requestTracker) fail(id proto.NetworkRequestID, reason string, at proto.MonotonicTime, attrs ...slog.Attr) {
+// fail counts a failed request under its status and error, and logs it,
+// unless maxLoggedFailures have been logged already. Without a status, the
+// one recorded by onResponseHeaders is used, if any. A request is only
+// counted once, e.g. if its body fails to load after an error status.
+func (t *requestTracker) fail(id proto.NetworkRequestID, at proto.MonotonicTime, status int, errorText string, attrs ...slog.Attr) {
 	t.mu.Lock()
 	r, ok := t.pending[id]
+	status = cmp.Or(status, t.statuses[id])
+	delete(t.pending, id)
+	delete(t.statuses, id)
 	if !ok {
 		t.mu.Unlock()
 		return
 	}
-	delete(t.pending, id)
+
+	var reason []string
+	if status != 0 {
+		reason = append(reason, strconv.Itoa(status))
+		attrs = append(attrs, slog.Int("status", status))
+	}
+	if errorText != "" {
+		reason = append(reason, errorText)
+		attrs = append(attrs, slog.String("error", errorText))
+	}
+
 	t.failed++
-	t.failures[reason]++
+	t.failures[strings.Join(reason, " ")]++
 	log := t.logged < maxLoggedFailures
 	if log {
 		t.logged++

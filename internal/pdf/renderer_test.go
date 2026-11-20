@@ -156,6 +156,16 @@ func TestRodRenderer(t *testing.T) {
 		refused := "http://" + closed.Addr().String() + "/refused.png"
 		require.NoError(t, closed.Close())
 
+		// Another origin that responds like S3 when it throttles requests.
+		// Chromium blocks the response with ORB, so the page only sees an error.
+		storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>SlowDown</Code></Error>`)
+		}))
+		defer storage.Close()
+		slowDown := storage.URL + "/hero.jpg"
+
 		mux := http.NewServeMux()
 		mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
@@ -163,6 +173,7 @@ func TestRodRenderer(t *testing.T) {
 				<img src="/ok.png">
 				<div style="width: 10px; height: 10px; background-image: url(/throttled.png)"></div>
 				<img src="`+refused+`">
+				<div style="width: 10px; height: 10px; background-image: url(`+slowDown+`)"></div>
 			</body></html>`)
 		})
 		mux.HandleFunc("GET /ok.png", func(w http.ResponseWriter, r *http.Request) {
@@ -194,14 +205,18 @@ func TestRodRenderer(t *testing.T) {
 			}
 		}
 
-		require.Len(t, failed, 2, "failed requests: %v", failed)
+		require.Len(t, failed, 3, "failed requests: %v", failed)
 		assert.Equal(t, "WARN", failed["/throttled.png"]["level"])
 		assert.Equal(t, "Image", failed["/throttled.png"]["type"])
 		assert.Equal(t, float64(503), failed["/throttled.png"]["status"])
+		assert.NotContains(t, failed["/throttled.png"], "error")
 		assert.Equal(t, "net::ERR_CONNECTION_REFUSED", failed[refused]["error"])
+		assert.NotContains(t, failed[refused], "status")
+		assert.Equal(t, "net::ERR_BLOCKED_BY_ORB", failed[slowDown]["error"])
+		assert.Equal(t, float64(503), failed[slowDown]["status"])
 		require.NotNil(t, rendered)
-		assert.Equal(t, float64(4), rendered["requests"], "the page and its three images")
-		assert.Equal(t, float64(2), rendered["failed_requests"])
+		assert.Equal(t, float64(5), rendered["requests"], "the page and its four images")
+		assert.Equal(t, float64(3), rendered["failed_requests"])
 	})
 
 	t.Run("it_keeps_the_creator_without_prefix", func(t *testing.T) {

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ...
 
+## [0.11.2] - 2026-11-20
+
+### Fixed
+
+- Failed requests that Chromium blocked were logged without their HTTP status, e.g. cross-origin images with an error status and an XML body, which fail with `net::ERR_BLOCKED_BY_ORB`, as S3 sends them for missing objects (`403` without list permission) or throttled requests (`503`). Their status is logged now, and the summary counts failures by status and error, e.g. `503 net::ERR_BLOCKED_BY_ORB`.
+
 ## [0.11.1] - 2026-11-20
 
 ### Added
@@ -156,7 +162,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <p>Current locale: {{ locale }}</p>
   ```
 
-[Unreleased]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.2...HEAD
+[0.11.2]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/sehrgutesoftware/httpdf/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/sehrgutesoftware/httpdf/compare/v0.10.0...v0.10.1

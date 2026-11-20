@@ -108,6 +108,90 @@ func TestRequestTracker(t *testing.T) {
 		assert.Equal(t, float64(500), logs[0]["duration_ms"])
 	})
 
+	t.Run("it_logs_the_status_of_responses_that_chromium_blocked", func(t *testing.T) {
+		tracker, buf := newTracker(t)
+
+		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
+		tracker.onResponseHeaders(&proto.NetworkResponseReceivedExtraInfo{RequestID: "1", StatusCode: 503})
+		tracker.onFailed(failure("1", "net::ERR_BLOCKED_BY_ORB", 10))
+		tracker.onRequest(request("2", "https://bucket.example/b.jpg", 10))
+		tracker.onResponseHeaders(&proto.NetworkResponseReceivedExtraInfo{RequestID: "2", StatusCode: 403})
+		tracker.onFailed(failure("2", "net::ERR_BLOCKED_BY_ORB", 10))
+
+		logs := records(t, buf)
+		require.Len(t, logs, 2)
+		assert.Equal(t, float64(503), logs[0]["status"])
+		assert.Equal(t, "net::ERR_BLOCKED_BY_ORB", logs[0]["error"])
+		assert.Equal(t, float64(403), logs[1]["status"])
+	})
+
+	t.Run("it_summarizes_failures_by_status_and_error", func(t *testing.T) {
+		tracker, buf := newTracker(t)
+
+		for i := range maxLoggedFailures + 3 {
+			id := fmt.Sprint(i)
+			tracker.onRequest(request(id, fmt.Sprintf("https://bucket.example/%d.jpg", i), 10))
+			switch {
+			case i < 2:
+				tracker.onFailed(failure(id, "net::ERR_CONNECTION_RESET", 10))
+			case i < 5:
+				tracker.onResponse(response(id, 404, 10))
+			default:
+				tracker.onResponseHeaders(&proto.NetworkResponseReceivedExtraInfo{RequestID: proto.NetworkRequestID(id), StatusCode: 503})
+				tracker.onFailed(failure(id, "net::ERR_BLOCKED_BY_ORB", 10))
+			}
+		}
+		tracker.logSummary()
+
+		logs := records(t, buf)
+		summary := logs[len(logs)-1]
+		assert.Equal(t, "page requests failed", summary["msg"])
+		assert.Equal(t, map[string]any{
+			"404":                         float64(3),
+			"503 net::ERR_BLOCKED_BY_ORB": float64(maxLoggedFailures - 2),
+			"net::ERR_CONNECTION_RESET":   float64(2),
+		}, summary["reasons"])
+	})
+
+	t.Run("it_keeps_a_status_that_arrives_before_its_request", func(t *testing.T) {
+		tracker, buf := newTracker(t)
+
+		tracker.onResponseHeaders(&proto.NetworkResponseReceivedExtraInfo{RequestID: "1", StatusCode: 503})
+		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
+		tracker.onFailed(failure("1", "net::ERR_BLOCKED_BY_ORB", 10))
+
+		logs := records(t, buf)
+		require.Len(t, logs, 1)
+		assert.Equal(t, float64(503), logs[0]["status"])
+		assert.Empty(t, tracker.statuses)
+	})
+
+	t.Run("it_forgets_the_status_of_finished_requests", func(t *testing.T) {
+		tracker, _ := newTracker(t)
+
+		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
+		tracker.onResponseHeaders(&proto.NetworkResponseReceivedExtraInfo{RequestID: "1", StatusCode: 200})
+		tracker.onFinished(finished("1"))
+
+		assert.Empty(t, tracker.statuses)
+	})
+
+	t.Run("it_ignores_the_status_of_a_redirect", func(t *testing.T) {
+		tracker, buf := newTracker(t)
+
+		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
+		tracker.onResponseHeaders(&proto.NetworkResponseReceivedExtraInfo{RequestID: "1", StatusCode: 302})
+		redirect := request("1", "https://elsewhere.example/a.jpg", 10)
+		redirect.RedirectResponse = &proto.NetworkResponse{Status: 302}
+		tracker.onRequest(redirect)
+		tracker.onFailed(failure("1", "net::ERR_CONNECTION_REFUSED", 10))
+
+		logs := records(t, buf)
+		require.Len(t, logs, 1)
+		assert.Equal(t, "https://elsewhere.example/a.jpg", logs[0]["url"])
+		assert.NotContains(t, logs[0], "status")
+	})
+
 	t.Run("it_logs_canceled_requests", func(t *testing.T) {
 		tracker, buf := newTracker(t)
 
