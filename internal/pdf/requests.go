@@ -16,17 +16,10 @@ import (
 	"github.com/sehrgutesoftware/httpdf/internal/logging"
 )
 
-// maxLoggedFailures is how many failed requests per render are logged one by
-// one. The rest are only counted in a summary, so that an unreachable server
-// doesn't flood the log with a line per image.
-const maxLoggedFailures = 20
-
-// maxListedPending is how many URLs of pending requests are logged when the
-// PDF is printed
-const maxListedPending = 20
-
 // requestTracker follows the page's requests through the DevTools protocol and
-// logs those that fail, because Chromium prints the PDF without them.
+// logs those that fail, because Chromium prints the PDF without them. Each one
+// is logged at debug level, and summarized in a warning, so that an
+// unreachable server doesn't flood the log with a warning per image.
 type requestTracker struct {
 	ctx    context.Context
 	logger *slog.Logger
@@ -38,7 +31,6 @@ type requestTracker struct {
 	total    int
 	failures map[string]int
 	failed   int
-	logged   int
 }
 
 type trackedRequest struct {
@@ -146,10 +138,10 @@ func (t *requestTracker) onFailed(e *proto.NetworkLoadingFailed) {
 	t.fail(e.RequestID, e.Timestamp, 0, e.ErrorText, attrs...)
 }
 
-// fail counts a failed request under its status and error, and logs it,
-// unless maxLoggedFailures have been logged already. Without a status, the
-// one recorded by onResponseHeaders is used, if any. A request is only
-// counted once, e.g. if its body fails to load after an error status.
+// fail counts a failed request under its status and error, and logs it.
+// Without a status, the one recorded by onResponseHeaders is used, if any. A
+// request is only counted once, e.g. if its body fails to load after an error
+// status.
 func (t *requestTracker) fail(id proto.NetworkRequestID, at proto.MonotonicTime, status int, errorText string, attrs ...slog.Attr) {
 	t.mu.Lock()
 	r, ok := t.pending[id]
@@ -173,17 +165,9 @@ func (t *requestTracker) fail(id proto.NetworkRequestID, at proto.MonotonicTime,
 
 	t.failed++
 	t.failures[strings.Join(reason, " ")]++
-	log := t.logged < maxLoggedFailures
-	if log {
-		t.logged++
-	}
 	t.mu.Unlock()
 
-	if !log {
-		return
-	}
-
-	t.logger.LogAttrs(t.ctx, slog.LevelWarn, "page request failed", append([]slog.Attr{
+	t.logger.LogAttrs(t.ctx, slog.LevelDebug, "page request failed", append([]slog.Attr{
 		slog.String("component", "network"),
 		slog.String("url", t.logURL(r.url)),
 		slog.String("type", string(r.typ)),
@@ -191,8 +175,9 @@ func (t *requestTracker) fail(id proto.NetworkRequestID, at proto.MonotonicTime,
 	}, attrs...)...)
 }
 
-// logPending logs the requests that haven't finished yet. Meant to be called
-// right before printing, because the PDF won't contain their resources.
+// logPending logs the requests that haven't finished yet, each at debug level,
+// and their number as a warning. Meant to be called right before printing,
+// because the PDF won't contain their resources.
 func (t *requestTracker) logPending() {
 	t.mu.Lock()
 	pending := make([]trackedRequest, 0, len(t.pending))
@@ -206,25 +191,27 @@ func (t *requestTracker) logPending() {
 	}
 
 	slices.SortFunc(pending, func(a, b trackedRequest) int { return cmp.Compare(a.started, b.started) })
-	urls := make([]string, min(len(pending), maxListedPending))
-	for i := range urls {
-		urls[i] = t.logURL(pending[i].url)
+	for _, r := range pending {
+		t.logger.LogAttrs(t.ctx, slog.LevelDebug, "page request pending",
+			slog.String("component", "network"),
+			slog.String("url", t.logURL(r.url)),
+			slog.String("type", string(r.typ)),
+		)
 	}
 
-	t.logger.LogAttrs(t.ctx, slog.LevelWarn, "page requests pending",
+	t.logger.LogAttrs(t.ctx, slog.LevelWarn, "page requests pending", t.withDebugHint("pending",
 		slog.String("component", "network"),
 		slog.Int("count", len(pending)),
-		slog.Any("urls", urls),
-	)
+	)...)
 }
 
-// logSummary logs the number of failed requests by reason, if more of them
-// failed than were logged one by one
+// logSummary logs the number of failed requests by status and error as a
+// warning, if any failed
 func (t *requestTracker) logSummary() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.failed <= t.logged {
+	if t.failed == 0 {
 		return
 	}
 
@@ -238,12 +225,22 @@ func (t *requestTracker) logSummary() {
 		counts[i] = slog.Int(reason, t.failures[reason])
 	}
 
-	t.logger.LogAttrs(t.ctx, slog.LevelWarn, "page requests failed",
+	t.logger.LogAttrs(t.ctx, slog.LevelWarn, "page requests failed", t.withDebugHint("failed",
 		slog.String("component", "network"),
 		slog.Int("count", t.failed),
-		slog.Int("logged", t.logged),
+		slog.Int("requests", t.total),
 		slog.Group("reasons", counts...),
-	)
+	)...)
+}
+
+// withDebugHint adds a hint to the attributes of a warning that summarizes
+// requests, which are logged one by one at debug level, unless debug level is
+// enabled already
+func (t *requestTracker) withDebugHint(requests string, attrs ...slog.Attr) []slog.Attr {
+	if t.logger.Enabled(t.ctx, slog.LevelDebug) {
+		return attrs
+	}
+	return append(attrs, slog.String("hint", "Each "+requests+" request is logged at debug level, see HTTPDF_LOG_LEVEL"))
 }
 
 // counts returns the number of requests so far and how many of them failed

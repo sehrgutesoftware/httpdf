@@ -156,8 +156,8 @@ func (h *httpdf) serve(ctx context.Context, assets fs.FS, html []byte) http.Hand
 }
 
 // serveAssets serves the template's assets to the browser and logs each
-// request at debug level. Failed requests are logged as warnings by the
-// renderer, along with the page's other failed requests.
+// request at debug level. Failed requests are reported by the renderer, along
+// with the page's other failed requests.
 func (h *httpdf) serveAssets(ctx context.Context, assets fs.FS) http.Handler {
 	files := http.NotFoundHandler()
 	if assets != nil {

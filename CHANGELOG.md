@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-...
+### Changed
+
+- Failed page requests are logged at `debug`, all of them, instead of the first 20 at `warn`. A `page requests failed` warning summarizes them by status and error, along with the number of requests, whenever a request failed. Pending requests are logged the same way, as `page request pending` at `debug` and a `page requests pending` warning with their number. Below `debug`, the warnings point out the log level as `hint`.
 
 ## [0.11.2] - 2026-11-20
 
@@ -162,7 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <p>Current locale: {{ locale }}</p>
   ```
 
-[Unreleased]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.2...HEAD
+[Unreleased]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.3...HEAD
+[0.11.3]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.2...v0.11.3
 [0.11.2]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.1...v0.11.2
 [0.11.1]: https://github.com/sehrgutesoftware/httpdf/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/sehrgutesoftware/httpdf/compare/v0.10.1...v0.11.0

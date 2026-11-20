@@ -192,21 +192,25 @@ func TestRodRenderer(t *testing.T) {
 		require.NoError(t, err)
 
 		failed := map[string]map[string]any{}
+		var summaries []map[string]any
 		var rendered map[string]any
 		for line := range strings.Lines(log.String()) {
 			var record map[string]any
 			require.NoError(t, json.Unmarshal([]byte(line), &record))
+			assert.NotEqual(t, "page request pending", record["msg"])
 			assert.NotEqual(t, "page requests pending", record["msg"])
 			switch record["msg"] {
 			case "page request failed":
 				failed[record["url"].(string)] = record
+			case "page requests failed":
+				summaries = append(summaries, record)
 			case "pdf rendered":
 				rendered = record
 			}
 		}
 
 		require.Len(t, failed, 3, "failed requests: %v", failed)
-		assert.Equal(t, "WARN", failed["/throttled.png"]["level"])
+		assert.Equal(t, "DEBUG", failed["/throttled.png"]["level"])
 		assert.Equal(t, "Image", failed["/throttled.png"]["type"])
 		assert.Equal(t, float64(503), failed["/throttled.png"]["status"])
 		assert.NotContains(t, failed["/throttled.png"], "error")
@@ -214,6 +218,16 @@ func TestRodRenderer(t *testing.T) {
 		assert.NotContains(t, failed[refused], "status")
 		assert.Equal(t, "net::ERR_BLOCKED_BY_ORB", failed[slowDown]["error"])
 		assert.Equal(t, float64(503), failed[slowDown]["status"])
+		require.Len(t, summaries, 1)
+		assert.Equal(t, "WARN", summaries[0]["level"])
+		assert.Equal(t, float64(3), summaries[0]["count"])
+		assert.Equal(t, float64(5), summaries[0]["requests"])
+		assert.Equal(t, map[string]any{
+			"503":                         float64(1),
+			"503 net::ERR_BLOCKED_BY_ORB": float64(1),
+			"net::ERR_CONNECTION_REFUSED": float64(1),
+		}, summaries[0]["reasons"])
+		assert.NotContains(t, summaries[0], "hint")
 		require.NotNil(t, rendered)
 		assert.Equal(t, float64(5), rendered["requests"], "the page and its four images")
 		assert.Equal(t, float64(3), rendered["failed_requests"])

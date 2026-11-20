@@ -73,7 +73,7 @@ func TestRequestTracker(t *testing.T) {
 
 		logs := records(t, buf)
 		require.Len(t, logs, 1)
-		assert.Equal(t, "WARN", logs[0]["level"])
+		assert.Equal(t, "DEBUG", logs[0]["level"])
 		assert.Equal(t, "page request failed", logs[0]["msg"])
 		assert.Equal(t, "network", logs[0]["component"])
 		assert.Equal(t, "https://bucket.example/a.jpg", logs[0]["url"])
@@ -128,7 +128,7 @@ func TestRequestTracker(t *testing.T) {
 	t.Run("it_summarizes_failures_by_status_and_error", func(t *testing.T) {
 		tracker, buf := newTracker(t)
 
-		for i := range maxLoggedFailures + 3 {
+		for i := range 23 {
 			id := fmt.Sprint(i)
 			tracker.onRequest(request(id, fmt.Sprintf("https://bucket.example/%d.jpg", i), 10))
 			switch {
@@ -148,7 +148,7 @@ func TestRequestTracker(t *testing.T) {
 		assert.Equal(t, "page requests failed", summary["msg"])
 		assert.Equal(t, map[string]any{
 			"404":                         float64(3),
-			"503 net::ERR_BLOCKED_BY_ORB": float64(maxLoggedFailures - 2),
+			"503 net::ERR_BLOCKED_BY_ORB": float64(18),
 			"net::ERR_CONNECTION_RESET":   float64(2),
 		}, summary["reasons"])
 	})
@@ -270,7 +270,8 @@ func TestRequestTracker(t *testing.T) {
 
 	t.Run("it_keeps_urls_of_a_page_without_host", func(t *testing.T) {
 		var buf bytes.Buffer
-		tracker := newRequestTracker(t.Context(), "data:text/html,<p>hi</p>", slog.New(slog.NewJSONHandler(&buf, nil)))
+		logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		tracker := newRequestTracker(t.Context(), "data:text/html,<p>hi</p>", logger)
 
 		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
 		tracker.onFailed(failure("1", "net::ERR_FAILED", 10))
@@ -280,10 +281,10 @@ func TestRequestTracker(t *testing.T) {
 		assert.Equal(t, "https://bucket.example/a.jpg", logs[0]["url"])
 	})
 
-	t.Run("it_logs_the_first_failures_and_summarizes_all", func(t *testing.T) {
+	t.Run("it_logs_every_failure_and_summarizes_them", func(t *testing.T) {
 		tracker, buf := newTracker(t)
 
-		for i := range maxLoggedFailures + 5 {
+		for i := range 25 {
 			id := fmt.Sprint(i)
 			tracker.onRequest(request(id, fmt.Sprintf("https://bucket.example/%d.jpg", i), 10))
 			if i%10 == 0 {
@@ -292,23 +293,28 @@ func TestRequestTracker(t *testing.T) {
 				tracker.onResponse(response(id, 503, 10))
 			}
 		}
+		tracker.onRequest(request("ok", "https://bucket.example/ok.jpg", 10))
+		tracker.onFinished(finished("ok"))
 		tracker.logSummary()
 
 		logs := records(t, buf)
-		require.Len(t, logs, maxLoggedFailures+1)
-		for _, record := range logs[:maxLoggedFailures] {
+		require.Len(t, logs, 26)
+		for i, record := range logs[:25] {
+			assert.Equal(t, "DEBUG", record["level"])
 			assert.Equal(t, "page request failed", record["msg"])
+			assert.Equal(t, fmt.Sprintf("https://bucket.example/%d.jpg", i), record["url"])
 		}
-		summary := logs[maxLoggedFailures]
+		summary := logs[25]
 		assert.Equal(t, "WARN", summary["level"])
 		assert.Equal(t, "page requests failed", summary["msg"])
 		assert.Equal(t, "network", summary["component"])
-		assert.Equal(t, float64(maxLoggedFailures+5), summary["count"])
-		assert.Equal(t, float64(maxLoggedFailures), summary["logged"])
+		assert.Equal(t, float64(25), summary["count"])
+		assert.Equal(t, float64(26), summary["requests"])
 		assert.Equal(t, map[string]any{"503": float64(22), "net::ERR_CONNECTION_RESET": float64(3)}, summary["reasons"])
+		assert.NotContains(t, summary, "hint")
 	})
 
-	t.Run("it_does_not_summarize_if_all_failures_were_logged", func(t *testing.T) {
+	t.Run("it_summarizes_a_single_failure", func(t *testing.T) {
 		tracker, buf := newTracker(t)
 
 		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
@@ -316,11 +322,14 @@ func TestRequestTracker(t *testing.T) {
 		tracker.logSummary()
 
 		logs := records(t, buf)
-		require.Len(t, logs, 1)
+		require.Len(t, logs, 2)
 		assert.Equal(t, "page request failed", logs[0]["msg"])
+		assert.Equal(t, "page requests failed", logs[1]["msg"])
+		assert.Equal(t, float64(1), logs[1]["count"])
+		assert.Equal(t, map[string]any{"404": float64(1)}, logs[1]["reasons"])
 	})
 
-	t.Run("it_logs_pending_requests_in_the_order_they_were_sent", func(t *testing.T) {
+	t.Run("it_logs_every_pending_request_in_the_order_they_were_sent_and_their_number", func(t *testing.T) {
 		tracker, buf := newTracker(t)
 
 		tracker.onRequest(request("1", "https://bucket.example/late.jpg", 12))
@@ -330,25 +339,37 @@ func TestRequestTracker(t *testing.T) {
 		tracker.logPending()
 
 		logs := records(t, buf)
-		require.Len(t, logs, 1)
-		assert.Equal(t, "WARN", logs[0]["level"])
-		assert.Equal(t, "page requests pending", logs[0]["msg"])
-		assert.Equal(t, "network", logs[0]["component"])
-		assert.Equal(t, float64(2), logs[0]["count"])
-		assert.Equal(t, []any{"/assets/early.css", "https://bucket.example/late.jpg"}, logs[0]["urls"])
+		require.Len(t, logs, 3)
+		for i, url := range []string{"/assets/early.css", "https://bucket.example/late.jpg"} {
+			assert.Equal(t, "DEBUG", logs[i]["level"])
+			assert.Equal(t, "page request pending", logs[i]["msg"])
+			assert.Equal(t, "network", logs[i]["component"])
+			assert.Equal(t, url, logs[i]["url"])
+			assert.Equal(t, "Image", logs[i]["type"])
+		}
+		assert.Equal(t, "WARN", logs[2]["level"])
+		assert.Equal(t, "page requests pending", logs[2]["msg"])
+		assert.Equal(t, "network", logs[2]["component"])
+		assert.Equal(t, float64(2), logs[2]["count"])
+		assert.NotContains(t, logs[2], "urls")
+		assert.NotContains(t, logs[2], "hint")
 	})
 
-	t.Run("it_lists_a_limited_number_of_pending_requests", func(t *testing.T) {
-		tracker, buf := newTracker(t)
+	t.Run("it_hints_at_the_debug_level_if_its_disabled", func(t *testing.T) {
+		var buf bytes.Buffer
+		tracker := newRequestTracker(t.Context(), pageURL, slog.New(slog.NewJSONHandler(&buf, nil)))
 
-		for i := range maxListedPending + 5 {
-			tracker.onRequest(request(fmt.Sprint(i), fmt.Sprintf("https://bucket.example/%d.jpg", i), proto.MonotonicTime(i)))
-		}
+		tracker.onRequest(request("1", "https://bucket.example/a.jpg", 10))
+		tracker.onResponse(response("1", 503, 10))
+		tracker.onRequest(request("2", "https://bucket.example/b.jpg", 10))
 		tracker.logPending()
+		tracker.logSummary()
 
-		logs := records(t, buf)
-		require.Len(t, logs, 1)
-		assert.Equal(t, float64(maxListedPending+5), logs[0]["count"])
-		assert.Len(t, logs[0]["urls"], maxListedPending)
+		logs := records(t, &buf)
+		require.Len(t, logs, 2)
+		assert.Equal(t, "page requests pending", logs[0]["msg"])
+		assert.Equal(t, "Each pending request is logged at debug level, see HTTPDF_LOG_LEVEL", logs[0]["hint"])
+		assert.Equal(t, "page requests failed", logs[1]["msg"])
+		assert.Equal(t, "Each failed request is logged at debug level, see HTTPDF_LOG_LEVEL", logs[1]["hint"])
 	})
 }
